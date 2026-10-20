@@ -14,8 +14,13 @@ urlpatterns = [
     path("cliente/solicitud/nueva/", views.solicitud_nueva, name="solicitud_nueva"),
     path("cliente/tecnicos/", views.tecnicos, name="tecnicos"),
     path("cliente/historial/", views.cliente_historial, name="cliente_historial"),
+    path("cliente/perfil/", views.cliente_perfil, name="cliente_perfil"),
+    path("cliente/perfil/correo/<str:token>/", views.confirmar_correo_cliente,
+         name="confirmar_correo_cliente"),
     # Técnico
     path("tecnico/solicitudes/", views.tecnico_solicitudes, name="tecnico_solicitudes"),
+    path("tecnico/solicitudes/<int:solicitud_id>/accion/", views.tecnico_solicitud_accion,
+         name="tecnico_solicitud_accion"),
         path("tecnico/perfil/", views.tecnico_perfil, name="tecnico_perfil"),
         path("tecnico/perfil/correo/<str:token>/", views.confirmar_correo_tecnico,
             name="confirmar_correo_tecnico"),

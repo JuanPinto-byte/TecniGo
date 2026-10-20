@@ -7,6 +7,7 @@
 
   <form method="post" enctype="multipart/form-data" class="fx-card needs-validation" novalidate>
     {% csrf_token %}
+    {% if errores %}<div class="alert alert-danger"><ul class="mb-0">{% for e in errores %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
 
     <fieldset class="mb-4">
       <legend class="form-label">Categoría del daño</legend>
@@ -29,13 +30,13 @@
       </div>
       <textarea class="form-control" id="descripcion" name="descripcion" rows="4"
                 minlength="10" maxlength="300" data-counter="#cuenta-desc" required
-                placeholder="Ej: Hay una fuga de agua debajo del lavaplatos y gotea todo el día."></textarea>
+                placeholder="Ej: Hay una fuga de agua debajo del lavaplatos y gotea todo el día.">{{ valores.descripcion }}</textarea>
       <div class="invalid-feedback">Describe el problema con al menos 10 caracteres.</div>
     </div>
 
     <div class="mb-4">
       <label class="form-label" for="direccion">Dirección del servicio</label>
-      <input class="form-control" id="direccion" name="direccion" value="{{ cliente.direccion }}" required>
+      <input class="form-control" id="direccion" name="direccion" value="{{ valores.direccion }}" required>
       <div class="form-text">La tomamos de tu perfil; puedes cambiarla para este servicio.</div>
       <div class="invalid-feedback">Escribe la dirección donde se hará el servicio.</div>
     </div>
@@ -50,10 +51,10 @@
     <div class="mb-4">
       <span class="form-label d-block">Urgencia</span>
       <div class="fx-seg" role="radiogroup" aria-label="Urgencia" id="urgencia">
-        <button type="button" class="is-on" role="radio" aria-checked="true" data-valor="normal">Normal</button>
-        <button type="button" role="radio" aria-checked="false" data-valor="urgente">Urgente</button>
+        <button type="button" class="{% if valores.urgencia != 'urgente' %}is-on{% endif %}" role="radio" aria-checked="{% if valores.urgencia != 'urgente' %}true{% else %}false{% endif %}" data-valor="normal">Normal</button>
+        <button type="button" class="{% if valores.urgencia == 'urgente' %}is-on{% endif %}" role="radio" aria-checked="{% if valores.urgencia == 'urgente' %}true{% else %}false{% endif %}" data-valor="urgente">Urgente</button>
       </div>
-      <input type="hidden" name="urgencia" id="urgencia-valor" value="normal">
+      <input type="hidden" name="urgencia" id="urgencia-valor" value="{{ valores.urgencia|default:'normal' }}">
     </div>
 
     <button class="btn btn-fx btn-lg w-100" type="submit">Buscar técnicos</button>

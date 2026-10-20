@@ -266,13 +266,18 @@ class Solicitud(models.Model):
     # ---- Transiciones de estado, para que las vistas no dupliquen lógica ----
 
     def aceptar(self, tecnico):
-        """FN-11: solo si sigue pendiente; evita condición de carrera al aceptar."""
-        if self.estado != self.Estado.PENDIENTE:
+        """
+        FN-11: solo si sigue pendiente. El UPDATE condicional es atómico en la
+        base de datos: si dos técnicos aceptan a la vez, solo uno modifica la fila.
+        """
+        ahora = timezone.now()
+        filas = Solicitud.objects.filter(pk=self.pk, estado=self.Estado.PENDIENTE).update(
+            tecnico=tecnico, estado=self.Estado.EN_CURSO, fecha_asignacion=ahora)
+        if filas == 0:
             raise ValueError("La solicitud ya no está disponible.")
         self.tecnico = tecnico
         self.estado = self.Estado.EN_CURSO
-        self.fecha_asignacion = timezone.now()
-        self.save(update_fields=["tecnico", "estado", "fecha_asignacion"])
+        self.fecha_asignacion = ahora
 
     def rechazar(self, tecnico):
         """FN-11: sigue pendiente y disponible para los demás técnicos."""

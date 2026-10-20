@@ -18,7 +18,7 @@
   <span class="text-muted" id="conteo" aria-live="polite"></span>
 </div>
 
-<div id="pausa" class="fx-card fx-empty" hidden>
+<div id="pausa" class="fx-card fx-empty" {% if perfil.disponible %}hidden{% endif %}>
   <i class="bi bi-pause-circle"></i>
   <h3>Estás en pausa</h3>
   <p class="text-muted mb-0">No recibirás solicitudes nuevas hasta que actives tu disponibilidad. Los servicios que ya tienes en curso siguen igual.</p>
@@ -30,31 +30,32 @@
     <article class="fx-card h-100 d-flex flex-column">
       <div class="d-flex align-items-start justify-content-between gap-2 mb-2">
         <div class="d-flex align-items-center gap-2">
-          <div class="fx-avatar fx-avatar--sm" aria-hidden="true">{{ s.cliente|slice:":1" }}</div>
+          <div class="fx-avatar fx-avatar--sm" aria-hidden="true">{{ s.cliente.nombre_completo|slice:":1" }}</div>
           <div>
-            <div class="fw-bold">{{ s.cliente }}</div>
-            <div class="small text-muted">{{ s.fecha }}</div>
+            <div class="fw-bold">{{ s.cliente.nombre_completo }}</div>
+            <div class="small text-muted">{{ s.fecha_creacion|date:"j M Y, g:i a" }}</div>
           </div>
         </div>
-        {% if s.urgente %}<span class="fx-badge fx-badge--urgente"><i class="bi bi-exclamation-triangle-fill"></i> Urgente</span>{% endif %}
+        {% if s.urgencia == "urgente" %}<span class="fx-badge fx-badge--urgente"><i class="bi bi-exclamation-triangle-fill"></i> Urgente</span>{% endif %}
       </div>
 
-      <div class="fw-bold mb-1"><i class="bi {{ s.icono }}"></i> {{ s.categoria }}</div>
+      <div class="fw-bold mb-1"><i class="bi {{ s.icono }}"></i> {{ s.get_categoria_display }}</div>
       <p class="mb-2">{{ s.descripcion }}</p>
       <div class="small text-muted mb-2"><i class="bi bi-geo-alt-fill"></i> {{ s.direccion }}</div>
 
-      {% if s.fotos %}
-      <div class="d-flex gap-2 mb-2" aria-label="{{ s.fotos }} foto(s) adjunta(s)">
-        {% for f in ""|ljust:s.fotos %}
-        <div class="d-grid place-items-center rounded-3 bg-light border" style="width:64px;height:64px;place-items:center"><i class="bi bi-image text-muted"></i></div>
+      {% if s.fotos_evidencia %}
+      <div class="d-flex gap-2 mb-2">
+        {% for f in s.fotos_evidencia %}
+        <a href="{{ f.imagen.url }}" target="_blank" rel="noopener"><img src="{{ f.imagen.url }}" alt="Foto de evidencia {{ forloop.counter }}" class="rounded-3 border" style="width:64px;height:64px;object-fit:cover"></a>
         {% endfor %}
       </div>
       {% endif %}
 
-      <div class="d-flex gap-2 mt-auto pt-2">
-        <button class="btn btn-line flex-fill" data-accion="rechazar">Rechazar</button>
-        <button class="btn btn-fx flex-fill" data-accion="aceptar">Aceptar</button>
-      </div>
+      <form method="post" action="{% url 'tecnico_solicitud_accion' s.pk %}" class="d-flex gap-2 mt-auto pt-2">
+        {% csrf_token %}
+        <button class="btn btn-line flex-fill" name="accion" value="rechazar">Rechazar</button>
+        <button class="btn btn-fx flex-fill" name="accion" value="aceptar">Aceptar</button>
+      </form>
     </article>
   </div>
   {% endfor %}
@@ -63,7 +64,7 @@
 <div id="sinSolicitudes" class="fx-card fx-empty" hidden>
   <i class="bi bi-inbox"></i>
   <h3>No hay solicitudes por ahora</h3>
-  <p class="text-muted mb-0">Cuando un cliente de tu especialidad te elija, aparecerá aquí.</p>
+  <p class="text-muted mb-0">Cuando un cliente cree una solicitud de tu especialidad y estés disponible, aparecerá aquí.</p>
 </div>
 {% endblock %}
 
@@ -81,15 +82,6 @@
     conteo.textContent = n === 1 ? "1 solicitud" : `${n} solicitudes`;
     vacio.hidden = n > 0;
   }
-
-  // Aceptar / rechazar (FN-11)
-  bandeja.addEventListener("click", (e) => {
-    const b = e.target.closest("[data-accion]"); if (!b) return;
-    const col = b.closest("[data-solicitud]");
-    col.remove();
-    fxToast(b.dataset.accion === "aceptar" ? "Solicitud aceptada. Quedó en curso." : "Solicitud rechazada.");
-    contar();
-  });
 
   // Disponibilidad (FN-10)
   sw.addEventListener("change", () => {

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Mi perfil{% endblock %}
+{% block content %}
+<div class="fx-auth fx-auth--wide">
+  <h1>Mi perfil</h1>
+  <p class="text-muted">Mantén tus datos al día. Tu cédula no se puede modificar.</p>
+
+  {% if sin_direccion %}
+  <div class="alert alert-warning">Registra tu dirección: la necesitas para poder crear solicitudes de servicio.</div>
+  {% endif %}
+
+  <form method="post" class="fx-card" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Cédula</label>
+        <input class="form-control" value="{{ request.user.cedula }}" disabled>
+      </div>
+      {% for field in form %}
+      <div class="col-md-6">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.name == "correo" %}<div class="form-text">El cambio se aplica solo tras confirmar el enlace enviado a la nueva dirección.</div>{% endif %}
+        {% if field.name == "password_nueva" %}<div class="form-text">Mínimo 8 caracteres, una mayúscula, un número y un símbolo.</div>{% endif %}
+        {% for error in field.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    <button class="btn btn-fx mt-4" type="submit">Guardar cambios</button>
+  </form>
+</div>
+{% endblock %}

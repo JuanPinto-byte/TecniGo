@@ -12,8 +12,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from core.forms import PerfilTecnicoForm, RegistroClienteForm, RegistroTecnicoForm
-from core.models import Categoria, Notificacion, PerfilTecnico, Usuario
+from core.forms import PerfilClienteForm, PerfilTecnicoForm, RegistroClienteForm, SolicitudForm, RegistroTecnicoForm
+from core.models import Categoria, Notificacion, PerfilTecnico, Solicitud, Usuario
 
 from . import datos_falsos as d
 
@@ -26,6 +26,10 @@ def requiere_rol(rol):
             usuario = request.user
             if usuario.rol != rol:
                 messages.error(request, "No tienes permiso para acceder a esta sección.")
+                return redirect("login")
+            if usuario.esta_suspendido:  # FN-2/FN-15: una cuenta suspendida no opera
+                logout(request)
+                messages.error(request, "Tu cuenta está suspendida.")
                 return redirect("login")
             if rol == Usuario.Rol.TECNICO and usuario.estado != Usuario.Estado.ACTIVO:
                 logout(request)
@@ -114,10 +118,22 @@ def cliente_inicio(request):
 
 @requiere_rol(Usuario.Rol.CLIENTE)
 def solicitud_nueva(request):
+    """FN-3: crea la solicitud (pendiente) y la difunde a los técnicos de la categoría."""
+    if not request.user.direccion.strip():
+        messages.warning(request, "Registra tu dirección en tu perfil antes de crear una solicitud.")
+        return redirect("cliente_perfil")
+    form = None
     if request.method == "POST":
-        return redirect("tecnicos")  # FN-3: al crear, va a técnicos disponibles
+        form = SolicitudForm(request.POST, fotos=request.FILES.getlist("fotos"))
+        if form.is_valid():
+            form.save(request.user)
+            messages.success(request, "Solicitud creada. Avisamos a los técnicos disponibles de la categoría.")
+            return redirect("tecnicos")
+    valores = request.POST if form else {"direccion": request.user.direccion}
+    errores = [e for lista in form.errors.values() for e in lista] if form else []
     return render(request, "cliente/solicitud_nueva.html", _ctx(
-        "cliente", categorias=d.CATEGORIAS, preseleccion=request.GET.get("categoria", "")))
+        "cliente", categorias=d.CATEGORIAS, errores=errores, valores=valores,
+        preseleccion=valores.get("categoria") or request.GET.get("categoria", "")))
 
 
 @requiere_rol(Usuario.Rol.CLIENTE)
@@ -171,12 +187,111 @@ def cliente_historial(request):
     return render(request, "cliente/historial.html", _ctx("cliente", solicitudes=d.HISTORIAL_CLIENTE))
 
 
+@requiere_rol(Usuario.Rol.CLIENTE)
+def cliente_perfil(request):
+    """FN-2: el cliente edita sus datos; correo nuevo requiere verificación."""
+    if request.method == "POST":
+        form = PerfilClienteForm(request.POST, usuario=request.user)
+        if form.is_valid():
+            correo_nuevo = form.cleaned_data["correo"]
+            cambio_correo = correo_nuevo.casefold() != request.user.correo.casefold()
+            form.save()
+            update_session_auth_hash(request, request.user)
+            if cambio_correo:
+                token = signing.dumps(
+                    {"usuario": request.user.pk, "correo": correo_nuevo},
+                    salt="fixnow-verificar-correo-cliente",
+                )
+                url = request.build_absolute_uri(reverse(
+                    "confirmar_correo_cliente", kwargs={"token": token}))
+                send_mail(
+                    "Confirma tu nuevo correo de FixNow",
+                    f"Abre este enlace dentro de las próximas 24 horas para confirmar el cambio: {url}",
+                    settings.DEFAULT_FROM_EMAIL, [correo_nuevo], fail_silently=False,
+                )
+                messages.success(request, "Perfil actualizado. Confirma el enlace enviado al correo nuevo; mientras tanto sigue activo el actual.")
+            else:
+                messages.success(request, "Perfil actualizado.")
+            return redirect("cliente_perfil")
+    else:
+        form = PerfilClienteForm(usuario=request.user)
+    return render(request, "cliente/perfil.html", _ctx(
+        "cliente", form=form, sin_direccion=not request.user.direccion))
+
+
+@requiere_rol(Usuario.Rol.CLIENTE)
+def confirmar_correo_cliente(request, token):
+    try:
+        datos = signing.loads(token, salt="fixnow-verificar-correo-cliente", max_age=86400)
+    except signing.SignatureExpired:
+        messages.error(request, "El enlace venció. Solicita nuevamente el cambio de correo.")
+        return redirect("cliente_perfil")
+    except signing.BadSignature:
+        messages.error(request, "El enlace de verificación no es válido.")
+        return redirect("cliente_perfil")
+    if datos.get("usuario") != request.user.pk:
+        messages.error(request, "Este enlace pertenece a otra cuenta.")
+    elif Usuario.objects.filter(correo__iexact=datos["correo"]).exclude(pk=request.user.pk).exists():
+        messages.error(request, "Ese correo ya está registrado por otra cuenta.")
+    else:
+        request.user.correo = datos["correo"]
+        request.user.save(update_fields=["correo"])
+        messages.success(request, "Correo actualizado y verificado.")
+    return redirect("cliente_perfil")
+
+
 # ---------- Técnico ----------
+ICONOS_CATEGORIA = {c["id"]: c["icono"] for c in d.CATEGORIAS}
+
+
+def _solicitudes_para(tecnico):
+    """FN-11: pendientes de mi especialidad, solo con disponibilidad activa, sin las que rechacé."""
+    perfil = tecnico.perfil_tecnico
+    if not perfil.disponible_para_solicitudes:
+        return Solicitud.objects.none()
+    return (Solicitud.objects
+            .filter(estado=Solicitud.Estado.PENDIENTE, categoria=perfil.especialidad)
+            .exclude(rechazada_por=tecnico)
+            .select_related("cliente").prefetch_related("fotos")
+            .order_by("-fecha_creacion"))
+
+
 @requiere_rol(Usuario.Rol.TECNICO)
 def tecnico_solicitudes(request):
+    solicitudes = list(_solicitudes_para(request.user))
+    for s in solicitudes:
+        s.icono = ICONOS_CATEGORIA.get(s.categoria, "bi-tools")
+        s.fotos_evidencia = [f for f in s.fotos.all() if f.tipo == "evidencia"]
     return render(request, "tecnico/solicitudes.html", _ctx(
-        "tecnico", solicitudes=d.SOLICITUDES_TECNICO,
-        perfil=request.user.perfil_tecnico))
+        "tecnico", solicitudes=solicitudes, perfil=request.user.perfil_tecnico))
+
+
+@require_POST
+@requiere_rol(Usuario.Rol.TECNICO)
+def tecnico_solicitud_accion(request, solicitud_id):
+    """FN-11: aceptar o rechazar una solicitud pendiente de mi bandeja."""
+    accion = request.POST.get("accion")
+    if accion not in {"aceptar", "rechazar"}:
+        return HttpResponseNotAllowed(["POST"])
+    # Solo puede actuar sobre solicitudes que de verdad están en su bandeja.
+    solicitud = _solicitudes_para(request.user).filter(pk=solicitud_id).first()
+    if solicitud is None:
+        messages.error(request, "Esta solicitud ya no está disponible.")
+        return redirect("tecnico_solicitudes")
+    if accion == "rechazar":
+        solicitud.rechazar(request.user)
+        messages.success(request, "Solicitud rechazada. Sigue disponible para otros técnicos.")
+        return redirect("tecnico_solicitudes")
+    try:
+        solicitud.aceptar(request.user)
+    except ValueError:  # otro técnico la aceptó primero
+        messages.error(request, "Otro técnico aceptó esta solicitud primero; ya no está disponible.")
+        return redirect("tecnico_solicitudes")
+    Notificacion.objects.create(
+        usuario=solicitud.cliente, tipo=Notificacion.Tipo.SOLICITUD_ACEPTADA, solicitud=solicitud,
+        mensaje=f"{request.user.nombre_completo} aceptó tu solicitud de {solicitud.get_categoria_display()}.")
+    messages.success(request, "Solicitud aceptada. Quedó en curso.")
+    return redirect("tecnico_solicitudes")
 
 
 @requiere_rol(Usuario.Rol.TECNICO)

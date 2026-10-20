@@ -22,6 +22,7 @@
   {% url 'cliente_historial' as u_cli_hist %}
   {% url 'tecnico_solicitudes' as u_tec_sol %}
   {% url 'tecnico_perfil' as u_tec_perfil %}
+  {% url 'cliente_perfil' as u_cli_perfil %}
   {% url 'admin_tecnicos' as u_adm_tec %}
 
   <header class="fx-header">
@@ -38,7 +39,7 @@
           <a class="fx-nav__item {% if request.path == u_cli_inicio %}is-active{% endif %}" href="{{ u_cli_inicio }}"><i class="bi bi-house-door-fill"></i><span>Inicio</span></a>
           <a class="fx-nav__item {% if request.path == u_tecnicos %}is-active{% endif %}" href="{{ u_tecnicos }}"><i class="bi bi-geo-alt-fill"></i><span>Técnicos</span></a>
           <a class="fx-nav__item {% if request.path == u_cli_hist %}is-active{% endif %}" href="{{ u_cli_hist }}"><i class="bi bi-receipt"></i><span>Solicitudes</span></a>
-          <a class="fx-nav__item" href="#" data-pronto><i class="bi bi-person-circle"></i><span>Perfil</span></a>
+          <a class="fx-nav__item {% if request.path == u_cli_perfil %}is-active{% endif %}" href="{{ u_cli_perfil }}"><i class="bi bi-person-circle"></i><span>Perfil</span></a>
         </nav>
       {% elif rol == 'tecnico' %}
         <nav class="fx-nav" aria-label="Principal">
