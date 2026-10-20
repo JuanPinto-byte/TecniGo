@@ -1,4 +1,4 @@
 {# Uso: {% include "partials/estado.html" with estado=s.estado %} #}
 <span class="fx-badge fx-badge--{{ estado }}">
-  {% if estado == "pendiente" %}Pendiente{% elif estado == "en_curso" %}En curso{% elif estado == "finalizada" %}Finalizada{% elif estado == "cancelada" %}Cancelada{% else %}{{ estado }}{% endif %}
+  {% if estado == "pendiente" %}Pendiente{% elif estado == "en_curso" %}En curso{% elif estado == "finalizada" %}Finalizada{% elif estado == "cancelada" %}Cancelada{% elif estado == "activo" %}Activo{% elif estado == "rechazado" %}Rechazado{% elif estado == "suspendido" %}Suspendido{% else %}{{ estado }}{% endif %}
 </span>

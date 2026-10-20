@@ -1,4 +1,4 @@
-/* FixNow - comportamientos comunes del frontend */
+/* TecniGo - comportamientos comunes del frontend */
 
 // ---- Toast ----
 function fxToast(mensaje) {

@@ -114,7 +114,7 @@
     const ids = new Set(visibles.map((c) => c.dataset.id));
     marcadores.forEach((m, id) => (ids.has(id) ? m.addTo(mapa) : m.remove()));
     if (circulo) { circulo.remove(); circulo = null; }
-    if (radio) circulo = L.circle([cli.lat, cli.lng], { radius: radio * 1000, color: "#111B2E", weight: 1.5, fillColor: "#FFC629", fillOpacity: .12 }).addTo(mapa);
+    if (radio) circulo = L.circle([cli.lat, cli.lng], { radius: radio * 1000, color: "#173B63", weight: 1.5, fillColor: "#0F766E", fillOpacity: .12 }).addTo(mapa);
 
     const pts = [[cli.lat, cli.lng], ...visibles.map((c) => { const t = techs.find((x) => String(x.id) === c.dataset.id); return [t.lat, t.lng]; })];
     mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
