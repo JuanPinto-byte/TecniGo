@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load static %}
 {% block title %}Inicio{% endblock %}
 {% block content %}
 <h1 class="h3 mb-3">Hola, {{ cliente.nombre|truncatewords:1 }}</h1>
@@ -33,14 +32,16 @@
   <h2>Técnicos cerca de ti</h2>
   <a href="{% url 'tecnicos' %}">Ver todos</a>
 </div>
+{% if tecnicos %}
 <div class="fx-scroller">
   {% for t in tecnicos %}{% include "partials/tarjeta_tecnico.html" %}{% endfor %}
 </div>
-
-{# Modal de confirmación reutilizado por las tarjetas (FN-4) #}
-{% include "partials/modal_elegir.html" %}
-{% endblock %}
-
-{% block extra_js %}
-<script src="{% static 'js/elegir.js' %}"></script>
+{% elif not cliente.ubicacion_disponible %}
+<div class="fx-card">
+  <p class="mb-2">Guarda una ubicación en tu perfil para consultar distancias reales.</p>
+  <a class="btn btn-line btn-sm" href="{% url 'tecnicos' %}">Ver técnicos disponibles</a>
+</div>
+{% else %}
+<p class="text-muted">No hay técnicos disponibles con ubicación registrada por ahora.</p>
+{% endif %}
 {% endblock %}

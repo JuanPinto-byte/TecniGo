@@ -1,6 +1,6 @@
 {# Tarjeta completa (FN-4/FN-5). Atributos data-* los usa el JS de filtrado. #}
 <article class="fx-card fx-tech" data-id="{{ t.id }}" data-nombre="{{ t.nombre }}"
-         data-km="{{ t.km|stringformat:'.2f' }}" data-rating="{% if t.rating %}{{ t.rating|stringformat:'.2f' }}{% else %}0{% endif %}">
+         data-km="{{ t.km|stringformat:'.6f' }}" data-rating="{% if t.rating %}{{ t.rating|stringformat:'.2f' }}{% else %}0{% endif %}">
   <div class="fx-tech__top">
     <div class="fx-avatar" aria-hidden="true">{{ t.iniciales }}</div>
     <div style="min-width:0">
@@ -21,6 +21,6 @@
       <div class="text-muted small">Precio de referencia</div>
       <div class="fx-tech__price">{{ t.precio_txt }}</div>
     </div>
-    <button type="button" class="btn btn-fx" data-elegir data-id="{{ t.id }}" data-nombre="{{ t.nombre }}">Elegir</button>
+    <span class="small text-muted"><i class="bi bi-check-circle"></i> Disponible</span>
   </div>
 </article>

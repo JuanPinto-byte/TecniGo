@@ -1,9 +1,17 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Mi perfil técnico{% endblock %}
 {% block content %}
 <div class="fx-auth fx-auth--wide">
   <h1>Mi perfil técnico</h1>
   <p class="text-muted">Mantén actualizados tus datos y la información que verán los clientes.</p>
+  <div class="alert alert-info">
+    <p class="mb-2">Registra la ubicación GPS de referencia de tu zona de cobertura para que los clientes puedan ver tu distancia.</p>
+    <button type="button" class="btn btn-fx" data-guardar-ubicacion data-url="{% url 'actualizar_ubicacion' %}">
+      <i class="bi bi-crosshair"></i> Guardar ubicación actual
+    </button>
+    <div class="mt-2" data-ubicacion-mensaje hidden role="alert"></div>
+  </div>
 
   <form method="post" enctype="multipart/form-data" class="fx-card">
     {% csrf_token %}
@@ -23,3 +31,4 @@
   </form>
 </div>
 {% endblock %}
+{% block extra_js %}<script src="{% static 'js/ubicacion.js' %}"></script>{% endblock %}

@@ -8,13 +8,33 @@
 {% block content %}
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
   <div>
-    <h1 class="h3 mb-0">Técnicos disponibles</h1>
+    <h1 class="h3 mb-0">Técnicos disponibles{% if categoria_nombre %} de {{ categoria_nombre }}{% endif %}</h1>
     <div class="text-muted" id="contador" aria-live="polite"></div>
   </div>
-  <div class="fx-seg fx-split-toggle" id="toggleVista" role="tablist" aria-label="Vista">
-    <button type="button" class="is-on" data-vista="lista" role="tab"><i class="bi bi-list-ul"></i> Lista</button>
-    <button type="button" data-vista="mapa" role="tab"><i class="bi bi-map"></i> Mapa</button>
-  </div>
+  {% if cliente.ubicacion_disponible %}
+    <div class="fx-seg fx-split-toggle" id="toggleVista" role="tablist" aria-label="Vista">
+      <button type="button" class="is-on" data-vista="lista" role="tab"><i class="bi bi-list-ul"></i> Lista</button>
+      <button type="button" data-vista="mapa" role="tab"><i class="bi bi-map"></i> Mapa</button>
+    </div>
+  {% endif %}
+</div>
+
+{% if not cliente.ubicacion_disponible %}
+<div class="alert alert-info" role="status">
+  <p class="mb-2">Para calcular distancias necesitamos tu GPS o una ubicación guardada en tu perfil. Si no permites el GPS, puedes registrar la ubicación previamente para usarla como referencia.</p>
+  <button type="button" class="btn btn-fx" data-guardar-ubicacion data-url="{% url 'actualizar_ubicacion' %}">
+    <i class="bi bi-crosshair"></i> Usar mi ubicación actual
+  </button>
+  <div class="mt-2" data-ubicacion-mensaje hidden role="alert"></div>
+</div>
+{% else %}
+<p class="small text-muted mb-3">Vista informativa: la solicitud no se asigna desde aquí. La asignación ocurre cuando un técnico la acepta desde su bandeja.</p>
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <span class="small text-muted">Las distancias usan la ubicación guardada en tu perfil.</span>
+  <button type="button" class="btn btn-line btn-sm" data-guardar-ubicacion data-url="{% url 'actualizar_ubicacion' %}">
+    <i class="bi bi-crosshair"></i> Actualizar desde GPS
+  </button>
+  <div data-ubicacion-mensaje hidden role="alert"></div>
 </div>
 
 <div class="d-flex flex-wrap gap-3 mb-3">
@@ -38,36 +58,38 @@
 
 <div class="fx-split" id="split" data-vista="lista">
   <div class="fx-list-col">
+    {% if tecnicos_sin_ubicacion %}
+    <div class="alert alert-warning" role="status">
+      {{ tecnicos_sin_ubicacion }} técnico{{ tecnicos_sin_ubicacion|pluralize }} compatible{{ tecnicos_sin_ubicacion|pluralize }} no se muestra{{ tecnicos_sin_ubicacion|pluralize:"n" }} porque no tiene{{ tecnicos_sin_ubicacion|pluralize:"n" }} ubicación registrada.
+    </div>
+    {% endif %}
     <div class="d-grid gap-3" id="lista-tecnicos">
       {% for t in tecnicos %}{% include "partials/tarjeta_tecnico.html" %}{% endfor %}
     </div>
     <div class="fx-card fx-empty" id="sin-resultados" hidden>
       <i class="bi bi-geo-alt"></i>
-      <h3>No hay técnicos dentro de este radio</h3>
+      <h3 id="sin-resultados-titulo">No hay técnicos dentro de este radio</h3>
       <p class="text-muted">Prueba con un radio más amplio para ver más opciones.</p>
       <button class="btn btn-fx" id="ampliar">Ampliar radio</button>
     </div>
   </div>
   <div class="fx-map-col">
     <div id="mapa" class="fx-map" role="region" aria-label="Mapa de técnicos"></div>
-    <p class="small text-muted mt-2 mb-0" id="avisoUbicacion" hidden>
-      <i class="bi bi-info-circle"></i> Ubicación aproximada: usamos la dirección de tu perfil.
-    </p>
   </div>
 </div>
+{% endif %}
 
-{% include "partials/modal_elegir.html" %}
 {{ tecnicos|json_script:"tecnicos-data" }}
 {{ cliente|json_script:"cliente-pos" }}
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="{% static 'js/elegir.js' %}"></script>
 <script>
 (() => {
   const techs = JSON.parse(document.getElementById("tecnicos-data").textContent);
   const cli = JSON.parse(document.getElementById("cliente-pos").textContent);
+  if (!cli.ubicacion_disponible) return;
   const lista = document.getElementById("lista-tecnicos");
   const tarjetas = [...lista.querySelectorAll(".fx-tech")];
   const vacio = document.getElementById("sin-resultados");
@@ -76,6 +98,9 @@
   let radio = 0;           // 0 = sin límite
   let orden = "cercania";
   const pasos = [2, 5, 10, 0];
+  const tituloSinResultados = document.getElementById("sin-resultados-titulo");
+  const mensajeSinResultados = vacio.querySelector("p");
+  const botonAmpliar = document.getElementById("ampliar");
 
   // ---- Mapa (FN-20) ----
   const mapa = L.map("mapa").setView([cli.lat, cli.lng], 13);
@@ -93,11 +118,15 @@
   const pin = L.divIcon({ className: "", html: '<div class="fx-pin"><i class="bi bi-wrench-adjustable"></i></div>', iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -34] });
   const marcadores = new Map();
   techs.forEach((t) => {
-    const califica = t.rating ? `★ ${t.rating_txt}` : t.rating_txt;
-    const m = L.marker([t.lat, t.lng], { icon: pin }).bindPopup(
-      `<strong>${t.nombre}</strong><br>${t.especialidad}<br>${califica} · ${String(t.km).replace(".", ",")} km<br>${t.precio_txt}<br>` +
-      `<button class="btn btn-fx btn-sm mt-2" data-elegir data-id="${t.id}" data-nombre="${t.nombre}">Elegir</button>`
-    );
+    const popup = document.createElement("div");
+    const nombre = document.createElement("strong");
+    nombre.textContent = t.nombre;
+    const detalle = document.createElement("div");
+    detalle.textContent = `${t.especialidad} · ${t.rating ? `★ ${t.rating_txt}` : t.rating_txt} · ${Number(t.km).toFixed(1).replace(".", ",")} km`;
+    const precio = document.createElement("div");
+    precio.textContent = t.precio_txt;
+    popup.append(nombre, detalle, precio);
+    const m = L.marker([t.lat, t.lng], { icon: pin }).bindPopup(popup);
     marcadores.set(String(t.id), m);
   });
   let circulo = null;
@@ -117,9 +146,20 @@
     if (radio) circulo = L.circle([cli.lat, cli.lng], { radius: radio * 1000, color: "#173B63", weight: 1.5, fillColor: "#0F766E", fillOpacity: .12 }).addTo(mapa);
 
     const pts = [[cli.lat, cli.lng], ...visibles.map((c) => { const t = techs.find((x) => String(x.id) === c.dataset.id); return [t.lat, t.lng]; })];
-    mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+    if (pts.length > 1) mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+    else mapa.setView([cli.lat, cli.lng], radio ? 14 : 13);
 
     vacio.hidden = visibles.length > 0;
+    const siguienteRadio = pasos[pasos.indexOf(radio) + 1];
+    botonAmpliar.hidden = siguienteRadio === undefined;
+    tituloSinResultados.textContent = radio
+      ? "No hay técnicos dentro de este radio"
+      : "No hay técnicos compatibles disponibles";
+    mensajeSinResultados.textContent = siguienteRadio === undefined
+      ? "No hay técnicos compatibles disponibles con ubicación registrada."
+      : siguienteRadio
+        ? `Prueba con un radio de ${siguienteRadio} km para ver más opciones.`
+        : "Amplía la búsqueda a sin límite para ver más opciones.";
     contador.textContent = visibles.length === 1 ? "1 técnico encontrado" : `${visibles.length} técnicos encontrados`;
   }
 
@@ -136,7 +176,8 @@
     aplicar();
   });
   document.getElementById("ampliar").addEventListener("click", () => {
-    const sig = pasos[pasos.indexOf(radio) + 1] ?? 0;
+    const sig = pasos[pasos.indexOf(radio) + 1];
+    if (sig === undefined) return;
     document.querySelector(`#filtroRadio [data-radio="${sig}"]`).click();
   });
 
@@ -151,4 +192,6 @@
   aplicar();
 })();
 </script>
+<script src="{% static 'js/ubicacion.js' %}"></script>
+<script src="{% static 'js/ubicacion.js' %}"></script>
 {% endblock %}

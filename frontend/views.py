@@ -1,4 +1,5 @@
 from functools import wraps
+import math
 from mimetypes import guess_type
 
 from django.conf import settings
@@ -7,7 +8,7 @@ from django.contrib.auth import authenticate, login, logout, update_session_auth
 from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.core.mail import send_mail
-from django.http import FileResponse, HttpResponseNotAllowed
+from django.http import FileResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -44,6 +45,44 @@ def _ctx(rol, **extra):
     base = {"rol": rol, "cliente": d.CLIENTE, "n_notif": 3}
     base.update(extra)
     return base
+
+
+def _coordenadas_validas(latitud, longitud):
+    return (
+        latitud is not None and longitud is not None
+        and math.isfinite(latitud) and math.isfinite(longitud)
+        and -90 <= latitud <= 90 and -180 <= longitud <= 180
+    )
+
+
+def _datos_tarjeta_tecnico(perfil, latitud_cliente=None, longitud_cliente=None):
+    usuario = perfil.usuario
+    if not _coordenadas_validas(usuario.latitud, usuario.longitud):
+        return None
+    rating = float(perfil.calificacion_promedio) or None
+    precio = int(perfil.precio_referencia) if perfil.precio_referencia is not None else None
+    partes_nombre = usuario.nombre_completo.split()
+    tiene_ubicacion_cliente = _coordenadas_validas(latitud_cliente, longitud_cliente)
+    return {
+        "id": usuario.pk,
+        "nombre": usuario.nombre_completo,
+        "iniciales": "".join(parte[0] for parte in partes_nombre[:2]).upper(),
+        "categoria": perfil.especialidad,
+        "especialidad": perfil.get_especialidad_display(),
+        "zona_cobertura": perfil.zona_cobertura,
+        "icono": ICONOS_CATEGORIA[perfil.especialidad],
+        "rating": rating,
+        "rating_txt": f"{rating:.1f}".replace(".", ",") if rating else "Sin calificaciones",
+        "resenas": perfil.total_calificaciones,
+        "precio": precio,
+        "precio_txt": d.precio_txt(precio),
+        "lat": usuario.latitud,
+        "lng": usuario.longitud,
+        "km": (
+            d.haversine_km(latitud_cliente, longitud_cliente, usuario.latitud, usuario.longitud)
+            if tiene_ubicacion_cliente else None
+        ),
+    }
 
 
 # ---------- Público ----------
@@ -111,9 +150,29 @@ def registro_tecnico(request):
 # ---------- Cliente ----------
 @requiere_rol(Usuario.Rol.CLIENTE)
 def cliente_inicio(request):
-    tecnicos = d.tecnicos()[:4]
+    tiene_ubicacion = _coordenadas_validas(request.user.latitud, request.user.longitud)
+    cliente = {
+        "nombre": request.user.nombre_completo,
+        "direccion": request.user.direccion,
+        "lat": request.user.latitud if tiene_ubicacion else None,
+        "lng": request.user.longitud if tiene_ubicacion else None,
+        "ubicacion_disponible": tiene_ubicacion,
+    }
+    perfiles = PerfilTecnico.objects.select_related("usuario").filter(
+        usuario__rol=Usuario.Rol.TECNICO,
+        usuario__estado=Usuario.Estado.ACTIVO,
+        disponible=True,
+    )
+    tecnicos = []
+    if tiene_ubicacion:
+        for perfil in perfiles:
+            datos = _datos_tarjeta_tecnico(perfil, cliente["lat"], cliente["lng"])
+            if datos is not None:
+                tecnicos.append(datos)
+    tecnicos.sort(key=lambda tecnico: tecnico["km"])
     return render(request, "cliente/inicio.html", _ctx(
-        "cliente", categorias=d.CATEGORIAS, en_curso=d.SOLICITUD_EN_CURSO, tecnicos=tecnicos))
+        "cliente", categorias=d.CATEGORIAS, en_curso=d.SOLICITUD_EN_CURSO,
+        tecnicos=tecnicos[:4], cliente=cliente))
 
 
 @requiere_rol(Usuario.Rol.CLIENTE)
@@ -126,9 +185,9 @@ def solicitud_nueva(request):
     if request.method == "POST":
         form = SolicitudForm(request.POST, fotos=request.FILES.getlist("fotos"))
         if form.is_valid():
-            form.save(request.user)
+            solicitud = form.save(request.user)
             messages.success(request, "Solicitud creada. Avisamos a los técnicos disponibles de la categoría.")
-            return redirect("tecnicos")
+            return redirect(f"{reverse('tecnicos')}?solicitud={solicitud.pk}")
     valores = request.POST if form else {"direccion": request.user.direccion}
     errores = [e for lista in form.errors.values() for e in lista] if form else []
     return render(request, "cliente/solicitud_nueva.html", _ctx(
@@ -138,48 +197,66 @@ def solicitud_nueva(request):
 
 @requiere_rol(Usuario.Rol.CLIENTE)
 def tecnicos(request):
-    iconos = {categoria: icono for categoria, icono in zip(
-        Categoria.values, ("bi-droplet-half", "bi-lightning-charge-fill", "bi-key-fill",
-                           "bi-tv-fill", "bi-tools")
-    )}
+    solicitud_id = request.GET.get("solicitud")
+    solicitud = None
+    categoria = None
+    if solicitud_id:
+        solicitud = get_object_or_404(Solicitud, pk=solicitud_id, cliente=request.user)
+        categoria = solicitud.categoria
+    elif request.GET.get("categoria") in Categoria.values:
+        categoria = request.GET["categoria"]
+
+    tiene_ubicacion = _coordenadas_validas(request.user.latitud, request.user.longitud)
     cliente = {
         "nombre": request.user.nombre_completo,
         "direccion": request.user.direccion,
-        "lat": request.user.latitud or d.CLIENTE["lat"],
-        "lng": request.user.longitud or d.CLIENTE["lng"],
+        "lat": request.user.latitud if tiene_ubicacion else None,
+        "lng": request.user.longitud if tiene_ubicacion else None,
+        "ubicacion_disponible": tiene_ubicacion,
     }
     tecnicos_disponibles = []
+    sin_ubicacion = 0
     perfiles = PerfilTecnico.objects.select_related("usuario").filter(
         usuario__rol=Usuario.Rol.TECNICO,
         usuario__estado=Usuario.Estado.ACTIVO,
         disponible=True,
     )
+    if categoria:
+        perfiles = perfiles.filter(especialidad=categoria)
     for perfil in perfiles:
-        usuario = perfil.usuario
-        lat = usuario.latitud if usuario.latitud is not None else cliente["lat"]
-        lng = usuario.longitud if usuario.longitud is not None else cliente["lng"]
-        rating = float(perfil.calificacion_promedio) or None
-        precio = int(perfil.precio_referencia) if perfil.precio_referencia is not None else None
-        iniciales = "".join(parte[0] for parte in usuario.nombre_completo.split()[:2]).upper()
-        tecnicos_disponibles.append({
-            "id": usuario.pk,
-            "nombre": usuario.nombre_completo,
-            "iniciales": iniciales,
-            "categoria": perfil.especialidad,
-            "especialidad": perfil.get_especialidad_display(),
-            "zona_cobertura": perfil.zona_cobertura,
-            "icono": iconos[perfil.especialidad],
-            "rating": rating,
-            "rating_txt": f"{rating:.1f}".replace(".", ",") if rating else "Sin calificaciones",
-            "resenas": perfil.total_calificaciones,
-            "precio": precio,
-            "precio_txt": d.precio_txt(precio),
-            "lat": lat,
-            "lng": lng,
-            "km": round(d.haversine_km(cliente["lat"], cliente["lng"], lat, lng), 1),
-        })
+        datos = _datos_tarjeta_tecnico(
+            perfil, cliente["lat"] if tiene_ubicacion else None,
+            cliente["lng"] if tiene_ubicacion else None)
+        if datos is None:
+            sin_ubicacion += 1
+            continue
+        tecnicos_disponibles.append(datos)
     return render(request, "cliente/tecnicos.html", _ctx(
-        "cliente", tecnicos=tecnicos_disponibles, cliente=cliente))
+        "cliente", tecnicos=tecnicos_disponibles, cliente=cliente, solicitud=solicitud,
+        categoria_nombre=dict(Categoria.choices).get(categoria), tecnicos_sin_ubicacion=sin_ubicacion))
+
+
+@require_POST
+@login_required
+def actualizar_ubicacion(request):
+    if request.user.rol not in (Usuario.Rol.CLIENTE, Usuario.Rol.TECNICO):
+        return JsonResponse({"error": "Este perfil no puede registrar una ubicación."}, status=403)
+    if request.user.esta_suspendido:
+        return JsonResponse({"error": "Una cuenta suspendida no puede actualizar su ubicación."}, status=403)
+    try:
+        latitud = float(request.POST.get("latitud", ""))
+        longitud = float(request.POST.get("longitud", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Las coordenadas recibidas no son válidas."}, status=400)
+    if (
+        not math.isfinite(latitud) or not math.isfinite(longitud)
+        or not -90 <= latitud <= 90 or not -180 <= longitud <= 180
+    ):
+        return JsonResponse({"error": "Las coordenadas recibidas están fuera de rango."}, status=400)
+    request.user.latitud = latitud
+    request.user.longitud = longitud
+    request.user.save(update_fields=["latitud", "longitud"])
+    return JsonResponse({"ok": True})
 
 
 @requiere_rol(Usuario.Rol.CLIENTE)

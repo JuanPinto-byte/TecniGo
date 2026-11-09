@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}Mi perfil{% endblock %}
 {% block content %}
 <div class="fx-auth fx-auth--wide">
@@ -8,6 +9,13 @@
   {% if sin_direccion %}
   <div class="alert alert-warning">Registra tu dirección: la necesitas para poder crear solicitudes de servicio.</div>
   {% endif %}
+  <div class="alert alert-info">
+    <p class="mb-2">Guarda una ubicación GPS como referencia de tu dirección. Si no permites el GPS al buscar técnicos, se usará esta ubicación guardada.</p>
+    <button type="button" class="btn btn-fx" data-guardar-ubicacion data-url="{% url 'actualizar_ubicacion' %}">
+      <i class="bi bi-crosshair"></i> Guardar ubicación actual
+    </button>
+    <div class="mt-2" data-ubicacion-mensaje hidden role="alert"></div>
+  </div>
 
   <form method="post" class="fx-card" novalidate>
     {% csrf_token %}
@@ -31,3 +39,4 @@
   </form>
 </div>
 {% endblock %}
+{% block extra_js %}<script src="{% static 'js/ubicacion.js' %}"></script>{% endblock %}

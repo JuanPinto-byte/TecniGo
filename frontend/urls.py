@@ -13,6 +13,7 @@ urlpatterns = [
     path("cliente/", views.cliente_inicio, name="cliente_inicio"),
     path("cliente/solicitud/nueva/", views.solicitud_nueva, name="solicitud_nueva"),
     path("cliente/tecnicos/", views.tecnicos, name="tecnicos"),
+    path("ubicacion/actualizar/", views.actualizar_ubicacion, name="actualizar_ubicacion"),
     path("cliente/historial/", views.cliente_historial, name="cliente_historial"),
     path("cliente/perfil/", views.cliente_perfil, name="cliente_perfil"),
     path("cliente/perfil/correo/<str:token>/", views.confirmar_correo_cliente,

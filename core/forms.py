@@ -288,11 +288,16 @@ class PerfilClienteForm(forms.Form):
 
     def save(self):
         u = self.usuario
+        direccion_cambio = u.direccion != self.cleaned_data["direccion"]
         u.nombre_completo = self.cleaned_data["nombre_completo"]
         u.telefono = self.cleaned_data["telefono"]
         u.direccion = self.cleaned_data["direccion"]
         u.fecha_nacimiento = self.cleaned_data.get("fecha_nacimiento")
         campos = ["nombre_completo", "telefono", "direccion", "fecha_nacimiento"]
+        if direccion_cambio:
+            u.latitud = None
+            u.longitud = None
+            campos.extend(["latitud", "longitud"])
         if self.cleaned_data.get("password_nueva"):
             u.set_password(self.cleaned_data["password_nueva"])
             campos.append("password")
