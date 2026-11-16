@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Notificaciones{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <h1 class="h3 mb-0">Notificaciones</h1>
+  {% if n_notif %}
+  <form method="post" action="{% url 'notificaciones_leer_todas' %}" class="m-0">
+    {% csrf_token %}
+    <button class="btn btn-line btn-sm" type="submit"><i class="bi bi-check2-all"></i> Marcar todas como leídas</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="d-grid gap-2">
+  {% for n in notificaciones %}
+  <form method="post" action="{% url 'notificacion_leer' n.pk %}" class="m-0">
+    {% csrf_token %}
+    <button type="submit" class="fx-card w-100 text-start d-flex align-items-start gap-3 {% if not n.leida %}border-primary{% endif %}"
+            aria-label="{% if not n.leida %}Sin leer: {% endif %}{{ n.mensaje }}">
+      <i class="bi {% if n.leida %}bi-bell text-muted{% else %}bi-bell-fill{% endif %} mt-1"></i>
+      <span class="flex-grow-1">
+        <span class="d-block {% if not n.leida %}fw-bold{% endif %}">{{ n.mensaje }}</span>
+        <span class="small text-muted">{{ n.get_tipo_display }} · {{ n.fecha_creacion|date:"j M Y, g:i a" }}</span>
+      </span>
+      {% if not n.leida %}<span class="fx-badge fx-badge--en_curso">Nueva</span>{% endif %}
+    </button>
+  </form>
+  {% empty %}
+  <div class="fx-card fx-empty">
+    <i class="bi bi-bell"></i>
+    <h3>No tienes notificaciones</h3>
+    <p class="text-muted mb-0">Aquí verás los cambios de estado de tus solicitudes.</p>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -8,13 +8,14 @@ from django.contrib.auth import authenticate, login, logout, update_session_auth
 from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.core.mail import send_mail
-from django.http import FileResponse, HttpResponseNotAllowed, JsonResponse
+from django.db import IntegrityError, transaction
+from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
-from core.forms import PerfilClienteForm, PerfilTecnicoForm, RegistroClienteForm, SolicitudForm, RegistroTecnicoForm
-from core.models import Categoria, Notificacion, PerfilTecnico, Solicitud, Usuario
+from core.forms import CalificacionForm, FinalizarSolicitudForm, PerfilClienteForm, PerfilTecnicoForm, RegistroClienteForm, SolicitudForm, RegistroTecnicoForm
+from core.models import Calificacion, Categoria, FotoSolicitud, Notificacion, PerfilTecnico, Solicitud, Usuario
 
 from . import datos_falsos as d
 
@@ -42,7 +43,8 @@ def requiere_rol(rol):
 
 
 def _ctx(rol, **extra):
-    base = {"rol": rol, "cliente": d.CLIENTE, "n_notif": 3}
+    # El encabezado (campana y dirección) lo aporta frontend.context.datos_encabezado.
+    base = {"rol": rol}
     base.update(extra)
     return base
 
@@ -259,9 +261,66 @@ def actualizar_ubicacion(request):
     return JsonResponse({"ok": True})
 
 
+def _orden_y_estado(request, estados_validos):
+    """FN-6 / FN-13: lee ?estado= y ?orden= y descarta cualquier valor desconocido."""
+    estado = request.GET.get("estado")
+    if estado not in estados_validos:
+        estado = "todas"
+    orden = "antigua" if request.GET.get("orden") == "antigua" else "reciente"
+    return estado, orden
+
+
+def _ordenar(queryset, orden):
+    # El desempate por id mantiene un orden estable cuando dos solicitudes comparten fecha.
+    campos = ("fecha_creacion", "pk") if orden == "antigua" else ("-fecha_creacion", "-pk")
+    return queryset.order_by(*campos)
+
+
 @requiere_rol(Usuario.Rol.CLIENTE)
 def cliente_historial(request):
-    return render(request, "cliente/historial.html", _ctx("cliente", solicitudes=d.HISTORIAL_CLIENTE))
+    """FN-6: todas mis solicitudes (nunca las de otro cliente), con filtro por estado y orden."""
+    estado, orden = _orden_y_estado(request, Solicitud.Estado.values)
+    consulta = Solicitud.objects.filter(cliente=request.user).select_related("tecnico", "calificacion")
+    if estado != "todas":
+        consulta = consulta.filter(estado=estado)
+    solicitudes = [{
+        "id": s.pk,
+        "categoria": s.get_categoria_display(),
+        "icono": ICONOS_CATEGORIA.get(s.categoria, "bi-tools"),
+        "descripcion": s.descripcion,
+        "fecha": s.fecha_creacion,
+        "estado": s.estado,
+        "tecnico": s.tecnico.nombre_completo if s.tecnico else "Sin asignar",
+        "puede_calificar": s.puede_calificarse,
+    } for s in _ordenar(consulta, orden)]
+    return render(request, "cliente/historial.html", _ctx(
+        "cliente", solicitudes=solicitudes, estado=estado, orden=orden,
+        hay_solicitudes=Solicitud.objects.filter(cliente=request.user).exists(),
+        estados=[("todas", "Todas")] + list(Solicitud.Estado.choices)))
+
+
+@require_POST
+@requiere_rol(Usuario.Rol.CLIENTE)
+def calificar_solicitud(request, solicitud_id):
+    """FN-7: una sola calificación, solo del cliente dueño y solo de una solicitud finalizada."""
+    solicitud = get_object_or_404(Solicitud, pk=solicitud_id, cliente=request.user)
+    if not solicitud.puede_calificarse:
+        messages.error(request, "Esta solicitud no se puede calificar (no está finalizada o ya fue calificada).")
+        return redirect("cliente_historial")
+    form = CalificacionForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Elige entre 1 y 5 estrellas; el comentario admite máximo 300 caracteres.")
+        return redirect("cliente_historial")
+    try:
+        with transaction.atomic():
+            Calificacion.objects.create(
+                solicitud=solicitud, estrellas=form.cleaned_data["estrellas"],
+                comentario=form.cleaned_data["comentario"])
+    except IntegrityError:  # doble clic: otra petición ya la guardó
+        messages.error(request, "Esta solicitud ya fue calificada.")
+        return redirect("cliente_historial")
+    messages.success(request, "¡Gracias por calificar!")
+    return redirect("cliente_historial")
 
 
 @requiere_rol(Usuario.Rol.CLIENTE)
@@ -369,6 +428,64 @@ def tecnico_solicitud_accion(request, solicitud_id):
         mensaje=f"{request.user.nombre_completo} aceptó tu solicitud de {solicitud.get_categoria_display()}.")
     messages.success(request, "Solicitud aceptada. Quedó en curso.")
     return redirect("tecnico_solicitudes")
+
+
+@require_POST
+@requiere_rol(Usuario.Rol.TECNICO)
+def tecnico_finalizar(request, solicitud_id):
+    """FN-12: solo el técnico asignado finaliza, y solo una solicitud en curso."""
+    solicitud = get_object_or_404(Solicitud, pk=solicitud_id, tecnico=request.user)
+    form = FinalizarSolicitudForm(request.POST, request.FILES)
+    if not form.is_valid():
+        messages.error(request, "Revisa los datos: notas de máximo 300 caracteres y foto jpg/png de hasta 5 MB.")
+        return redirect("tecnico_historial")
+    try:
+        with transaction.atomic():
+            solicitud.finalizar(form.cleaned_data["notas"])
+            if form.cleaned_data["foto"]:
+                FotoSolicitud.objects.create(
+                    solicitud=solicitud, imagen=form.cleaned_data["foto"],
+                    tipo=FotoSolicitud.Tipo.FINALIZACION)
+            Notificacion.objects.create(
+                usuario=solicitud.cliente, tipo=Notificacion.Tipo.SOLICITUD_FINALIZADA,
+                solicitud=solicitud,
+                mensaje=f"{request.user.nombre_completo} finalizó tu solicitud de {solicitud.get_categoria_display()}. Ya puedes calificar el servicio.")
+    except ValueError:
+        messages.error(request, "Esta solicitud ya no está en curso.")
+        return redirect("tecnico_historial")
+    messages.success(request, "Solicitud finalizada.")
+    return redirect("tecnico_historial")
+
+
+@require_GET
+@requiere_rol(Usuario.Rol.TECNICO)
+def tecnico_historial(request):
+    """FN-13: mis servicios (en curso y finalizados) con la calificación recibida, solo lectura."""
+    estado, orden = _orden_y_estado(request, (Solicitud.Estado.EN_CURSO, Solicitud.Estado.FINALIZADA))
+    consulta = Solicitud.objects.filter(
+        tecnico=request.user,
+        estado__in=(Solicitud.Estado.EN_CURSO, Solicitud.Estado.FINALIZADA),
+    ).select_related("cliente", "calificacion")
+    if estado != "todas":
+        consulta = consulta.filter(estado=estado)
+    servicios = []
+    for s in _ordenar(consulta, orden):
+        cal = getattr(s, "calificacion", None)
+        servicios.append({
+            "id": s.pk,
+            "cliente": s.cliente.nombre_completo,
+            "categoria": s.get_categoria_display(),
+            "icono": ICONOS_CATEGORIA.get(s.categoria, "bi-tools"),
+            "descripcion": s.descripcion,
+            "fecha": s.fecha_creacion,
+            "estado": s.estado,
+            "estrellas": cal.estrellas if cal else None,
+            "comentario": cal.comentario if cal else "",
+            "puede_finalizar": s.estado == Solicitud.Estado.EN_CURSO,
+        })
+    return render(request, "tecnico/historial.html", _ctx(
+        "tecnico", servicios=servicios, estado=estado, orden=orden,
+        estados=[("todas", "Todos"), ("en_curso", "En curso"), ("finalizada", "Finalizados")]))
 
 
 @requiere_rol(Usuario.Rol.TECNICO)
@@ -506,3 +623,72 @@ def admin_certificacion(request, usuario_id):
     archivo = tecnico.perfil_tecnico.documento_certificacion
     tipo = guess_type(archivo.name)[0] or "application/octet-stream"
     return FileResponse(archivo.open("rb"), content_type=tipo)
+
+
+# ---------- Notificaciones (FN-19) y detalle de solicitud: cualquier rol con sesión ----------
+ROL_VISTA = {
+    Usuario.Rol.CLIENTE: "cliente",
+    Usuario.Rol.TECNICO: "tecnico",
+    Usuario.Rol.ADMINISTRADOR: "admin",
+}
+
+
+def con_sesion_activa(vista):
+    """Exige sesión y cuenta no suspendida, sin importar el rol."""
+    @wraps(vista)
+    @login_required
+    def protegida(request, *args, **kwargs):
+        if request.user.esta_suspendido:
+            logout(request)
+            messages.error(request, "Tu cuenta está suspendida.")
+            return redirect("login")
+        return vista(request, *args, **kwargs)
+    return protegida
+
+
+@con_sesion_activa
+def notificaciones(request):
+    lista = Notificacion.objects.filter(usuario=request.user).select_related("solicitud")[:50]
+    return render(request, "notificaciones.html", _ctx(ROL_VISTA[request.user.rol], notificaciones=lista))
+
+
+@require_POST
+@con_sesion_activa
+def notificacion_leer(request, notificacion_id):
+    """Marca una notificación mía como leída y navega a su solicitud, si tiene."""
+    notificacion = get_object_or_404(Notificacion, pk=notificacion_id, usuario=request.user)
+    Notificacion.objects.filter(pk=notificacion.pk).update(leida=True)
+    if notificacion.solicitud_id:
+        return redirect("solicitud_detalle", solicitud_id=notificacion.solicitud_id)
+    return redirect("notificaciones")
+
+
+@require_POST
+@con_sesion_activa
+def notificaciones_leer_todas(request):
+    Notificacion.objects.filter(usuario=request.user, leida=False).update(leida=True)
+    return redirect("notificaciones")
+
+
+@con_sesion_activa
+def solicitud_detalle(request, solicitud_id):
+    """Detalle de solicitud: el cliente dueño, el técnico asignado o un técnico a quien se le ofrece."""
+    usuario = request.user
+    consulta = Solicitud.objects.select_related("cliente", "tecnico").prefetch_related("fotos")
+    if usuario.rol == Usuario.Rol.CLIENTE:
+        solicitud = get_object_or_404(consulta, pk=solicitud_id, cliente=usuario)
+    elif usuario.rol == Usuario.Rol.TECNICO:
+        solicitud = consulta.filter(pk=solicitud_id, tecnico=usuario).first()
+        if solicitud is None:  # todavía pendiente y en mi bandeja
+            solicitud = _solicitudes_para(usuario).filter(pk=solicitud_id).first()
+        if solicitud is None:
+            raise Http404
+    else:
+        raise Http404
+    return render(request, "solicitud_detalle.html", _ctx(
+        ROL_VISTA[usuario.rol], solicitud=solicitud,
+        icono=ICONOS_CATEGORIA.get(solicitud.categoria, "bi-tools"),
+        fotos_evidencia=[f for f in solicitud.fotos.all() if f.tipo == FotoSolicitud.Tipo.EVIDENCIA],
+        fotos_finalizacion=[f for f in solicitud.fotos.all() if f.tipo == FotoSolicitud.Tipo.FINALIZACION],
+        calificacion=getattr(solicitud, "calificacion", None),
+        ver_como_cliente=usuario.rol == Usuario.Rol.CLIENTE))

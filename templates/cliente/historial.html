@@ -3,23 +3,24 @@
 {% block content %}
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
   <h1 class="h3 mb-0">Mis solicitudes</h1>
-  <select class="form-select w-auto" id="orden" aria-label="Ordenar">
-    <option value="reciente" selected>Más reciente primero</option>
-    <option value="antigua">Más antigua primero</option>
-  </select>
+  <form method="get" class="m-0">
+    <input type="hidden" name="estado" value="{{ estado }}">
+    <select class="form-select w-auto" name="orden" aria-label="Ordenar" onchange="this.form.submit()">
+      <option value="reciente" {% if orden == "reciente" %}selected{% endif %}>Más reciente primero</option>
+      <option value="antigua" {% if orden == "antigua" %}selected{% endif %}>Más antigua primero</option>
+    </select>
+  </form>
 </div>
 
-<div class="fx-filters mb-3" id="filtros" role="group" aria-label="Filtrar por estado">
-  <button class="fx-pill is-on" data-estado="todas">Todas</button>
-  <button class="fx-pill" data-estado="pendiente">Pendiente</button>
-  <button class="fx-pill" data-estado="en_curso">En curso</button>
-  <button class="fx-pill" data-estado="finalizada">Finalizada</button>
-  <button class="fx-pill" data-estado="cancelada">Cancelada</button>
+<div class="fx-filters mb-3" role="group" aria-label="Filtrar por estado">
+  {% for valor, nombre in estados %}
+  <a class="fx-pill {% if estado == valor %}is-on{% endif %}" href="?estado={{ valor }}&orden={{ orden }}">{{ nombre }}</a>
+  {% endfor %}
 </div>
 
-<div class="d-grid gap-3" id="lista">
+<div class="d-grid gap-3">
   {% for s in solicitudes %}
-  <article class="fx-card" data-estado="{{ s.estado }}" data-orden="{{ forloop.counter }}">
+  <article class="fx-card">
     <div class="d-flex align-items-start gap-3">
       <div class="fx-cat__icon m-0 flex-shrink-0" style="width:48px;height:48px;border-radius:14px;font-size:1.2rem"><i class="bi {{ s.icono }}"></i></div>
       <div class="flex-grow-1" style="min-width:0">
@@ -28,30 +29,40 @@
           {% include "partials/estado.html" with estado=s.estado %}
         </div>
         <p class="mb-1 text-muted small">{{ s.descripcion }}</p>
-        <div class="small"><i class="bi bi-calendar3 text-muted"></i> {{ s.fecha }}
+        <div class="small"><i class="bi bi-calendar3 text-muted"></i> {{ s.fecha|date:"j M Y" }}
           <span class="mx-1 text-muted">|</span>
-          <i class="bi bi-person text-muted"></i> {{ s.tecnico|default:"Sin asignar" }}</div>
+          <i class="bi bi-person text-muted"></i> {{ s.tecnico }}</div>
       </div>
     </div>
-    {% if s.estado == "finalizada" and not s.calificada %}
     <div class="mt-3 d-flex gap-2">
-      <button class="btn btn-fx btn-sm" data-calificar data-tecnico="{{ s.tecnico }}"><i class="bi bi-star-fill"></i> Calificar servicio</button>
+      <a class="btn btn-line btn-sm" href="{% url 'solicitud_detalle' s.id %}">Ver detalle</a>
+      {% if s.puede_calificar %}
+      <button class="btn btn-fx btn-sm" type="button" data-calificar
+              data-url="{% url 'calificar_solicitud' s.id %}" data-tecnico="{{ s.tecnico }}"><i class="bi bi-star-fill"></i> Calificar servicio</button>
+      {% endif %}
     </div>
-    {% endif %}
   </article>
   {% endfor %}
 </div>
 
-<div class="fx-card fx-empty" id="vacio" hidden>
+{% if not solicitudes %}
+<div class="fx-card fx-empty">
   <i class="bi bi-receipt"></i>
+  {% if hay_solicitudes %}
   <h3>No tienes solicitudes en este estado</h3>
+  {% else %}
+  <h3>Aún no has creado solicitudes</h3>
+  {% endif %}
   <a class="btn btn-fx mt-2" href="{% url 'solicitud_nueva' %}">Crear solicitud</a>
 </div>
+{% endif %}
 
 {# Modal de calificación (FN-7) #}
 <div class="modal fade" id="modalCalificar" tabindex="-1" aria-labelledby="calTitulo" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
-    <form class="modal-content" id="formCalificar">
+    <form class="modal-content" id="formCalificar" method="post">
+      {% csrf_token %}
+      <input type="hidden" name="estrellas" id="estrellasValor">
       <div class="modal-header">
         <h2 class="modal-title h5" id="calTitulo">Califica a <span id="calTecnico"></span></h2>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
@@ -61,7 +72,7 @@
           {% for n in "12345" %}<button type="button" role="radio" aria-checked="false" aria-label="{{ n }} estrella{{ n|pluralize }}" data-n="{{ n }}"><i class="bi bi-star-fill"></i></button>{% endfor %}
         </div>
         <label class="form-label" for="comentario">Comentario <span class="fw-normal text-muted">(opcional)</span></label>
-        <textarea class="form-control" id="comentario" rows="3" maxlength="300" data-counter="#cuentaCom"></textarea>
+        <textarea class="form-control" id="comentario" name="comentario" rows="3" maxlength="300" data-counter="#cuentaCom"></textarea>
         <div class="small text-muted text-end" id="cuentaCom"></div>
         <div class="form-text">Solo puedes calificar una vez y no se puede editar después.</div>
       </div>
@@ -77,49 +88,22 @@
 {% block extra_js %}
 <script>
 (() => {
-  const lista = document.getElementById("lista");
-  const cards = [...lista.children];
-  const vacio = document.getElementById("vacio");
-  let estado = "todas";
-
-  function pintar() {
-    const asc = document.getElementById("orden").value === "antigua";
-    const visibles = cards.filter((c) => estado === "todas" || c.dataset.estado === estado);
-    cards.forEach((c) => (c.hidden = !visibles.includes(c)));
-    visibles.sort((a, b) => (asc ? b.dataset.orden - a.dataset.orden : a.dataset.orden - b.dataset.orden))
-            .forEach((c) => lista.appendChild(c));
-    vacio.hidden = visibles.length > 0;
-  }
-  document.getElementById("filtros").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-estado]"); if (!b) return;
-    estado = b.dataset.estado;
-    document.querySelectorAll("#filtros .fx-pill").forEach((x) => x.classList.toggle("is-on", x === b));
-    pintar();
-  });
-  document.getElementById("orden").addEventListener("change", pintar);
-
-  // ---- Calificación ----
   const modal = new bootstrap.Modal(document.getElementById("modalCalificar"));
+  const form = document.getElementById("formCalificar");
   const estrellas = [...document.querySelectorAll("#estrellas button")];
   const enviar = document.getElementById("enviarCal");
-  let nota = 0, cardActual = null;
+  const valor = document.getElementById("estrellasValor");
   const marcar = (n) => estrellas.forEach((s, i) => { s.classList.toggle("on", i < n); s.setAttribute("aria-checked", i + 1 === n); });
 
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-calificar]"); if (!b) return;
-    cardActual = b.closest("article"); nota = 0; marcar(0); enviar.disabled = true;
+    form.action = b.dataset.url; valor.value = ""; marcar(0); enviar.disabled = true;
     document.getElementById("calTecnico").textContent = b.dataset.tecnico;
     document.getElementById("comentario").value = "";
     modal.show();
   });
-  estrellas.forEach((s) => s.addEventListener("click", () => { nota = +s.dataset.n; marcar(nota); enviar.disabled = false; }));
-  document.getElementById("formCalificar").addEventListener("submit", (e) => {
-    e.preventDefault(); modal.hide();
-    cardActual.querySelector("[data-calificar]").closest("div").remove();
-    fxToast("¡Gracias por calificar!");
-  });
-
-  pintar();
+  estrellas.forEach((s) => s.addEventListener("click", () => { valor.value = s.dataset.n; marcar(+s.dataset.n); enviar.disabled = false; }));
+  form.addEventListener("submit", () => { enviar.disabled = true; });  // evita el doble envío
 })();
 </script>
 {% endblock %}

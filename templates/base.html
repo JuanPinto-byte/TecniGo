@@ -22,6 +22,7 @@
   {% url 'cliente_historial' as u_cli_hist %}
   {% url 'tecnico_solicitudes' as u_tec_sol %}
   {% url 'tecnico_perfil' as u_tec_perfil %}
+  {% url 'tecnico_historial' as u_tec_hist %}
   {% url 'cliente_perfil' as u_cli_perfil %}
   {% url 'admin_tecnicos' as u_adm_tec %}
 
@@ -44,7 +45,7 @@
       {% elif rol == 'tecnico' %}
         <nav class="fx-nav" aria-label="Principal">
           <a class="fx-nav__item {% if request.path == u_tec_sol %}is-active{% endif %}" href="{{ u_tec_sol }}"><i class="bi bi-inbox-fill"></i><span>Solicitudes</span></a>
-          <a class="fx-nav__item" href="#" data-pronto><i class="bi bi-clock-history"></i><span>Historial</span></a>
+          <a class="fx-nav__item {% if request.path == u_tec_hist %}is-active{% endif %}" href="{{ u_tec_hist }}"><i class="bi bi-clock-history"></i><span>Historial</span></a>
           <a class="fx-nav__item {% if request.path == u_tec_perfil %}is-active{% endif %}" href="{{ u_tec_perfil }}"><i class="bi bi-person-circle"></i><span>Perfil</span></a>
         </nav>
       {% elif rol == 'admin' %}
@@ -60,7 +61,7 @@
           <a class="btn btn-line btn-sm" href="{% url 'login' %}">Ingresar</a>
           <a class="btn btn-fx btn-sm d-none d-sm-inline-block" href="{% url 'registro_cliente' %}">Crear cuenta</a>
         {% else %}
-          <a class="fx-bell" href="#" data-pronto aria-label="Notificaciones: {{ n_notif }} sin leer">
+          <a class="fx-bell" href="{% url 'notificaciones' %}" aria-label="Notificaciones: {{ n_notif }} sin leer">
             <i class="bi bi-bell-fill"></i>
             {% if n_notif %}<span class="fx-bell__dot">{{ n_notif }}</span>{% endif %}
           </a>

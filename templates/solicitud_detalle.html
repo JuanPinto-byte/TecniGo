@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Solicitud #{{ solicitud.pk }}{% endblock %}
+{% block content %}
+<a class="small text-muted d-inline-block mb-2" href="{% if ver_como_cliente %}{% url 'cliente_historial' %}{% else %}{% url 'tecnico_historial' %}{% endif %}"><i class="bi bi-arrow-left"></i> Volver</a>
+<article class="fx-card">
+  <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+    <h1 class="h4 mb-0"><i class="bi {{ icono }}"></i> {{ solicitud.get_categoria_display }}</h1>
+    {% include "partials/estado.html" with estado=solicitud.estado %}
+  </div>
+  {% if solicitud.urgencia == "urgente" %}<span class="fx-badge fx-badge--urgente mb-2 d-inline-block"><i class="bi bi-exclamation-triangle-fill"></i> Urgente</span>{% endif %}
+  <p class="mb-2">{{ solicitud.descripcion }}</p>
+  <dl class="small mb-0">
+    <dt>Dirección</dt><dd>{{ solicitud.direccion }}</dd>
+    <dt>Creada</dt><dd>{{ solicitud.fecha_creacion|date:"j M Y, g:i a" }}</dd>
+    {% if ver_como_cliente %}
+    <dt>Técnico</dt><dd>{% if solicitud.tecnico %}{{ solicitud.tecnico.nombre_completo }}{% else %}Sin asignar{% endif %}</dd>
+    {% else %}
+    <dt>Cliente</dt><dd>{{ solicitud.cliente.nombre_completo }}</dd>
+    {% endif %}
+    {% if solicitud.fecha_finalizacion %}<dt>Finalizada</dt><dd>{{ solicitud.fecha_finalizacion|date:"j M Y, g:i a" }}</dd>{% endif %}
+    {% if solicitud.notas_finales %}<dt>Notas finales</dt><dd>{{ solicitud.notas_finales }}</dd>{% endif %}
+    {% if calificacion %}<dt>Calificación</dt><dd>{{ calificacion.estrellas }} de 5{% if calificacion.comentario %} · “{{ calificacion.comentario }}”{% endif %}</dd>{% endif %}
+  </dl>
+  {% if fotos_evidencia or fotos_finalizacion %}
+  <div class="d-flex flex-wrap gap-2 mt-3">
+    {% for f in fotos_evidencia %}<a href="{{ f.imagen.url }}" target="_blank" rel="noopener"><img src="{{ f.imagen.url }}" alt="Foto de evidencia {{ forloop.counter }}" class="rounded-3 border" style="width:84px;height:84px;object-fit:cover"></a>{% endfor %}
+    {% for f in fotos_finalizacion %}<a href="{{ f.imagen.url }}" target="_blank" rel="noopener"><img src="{{ f.imagen.url }}" alt="Foto de finalización {{ forloop.counter }}" class="rounded-3 border" style="width:84px;height:84px;object-fit:cover"></a>{% endfor %}
+  </div>
+  {% endif %}
+</article>
+{% endblock %}

@@ -467,3 +467,18 @@ class RegistroTecnicoForm(forms.ModelForm):
                     documento_certificacion=self.cleaned_data["documento_certificacion"],
                 )
         return usuario
+
+
+
+class FinalizarSolicitudForm(forms.Form):
+    """FN-12: notas finales y foto de evidencia, ambas opcionales."""
+
+    notas = forms.CharField(max_length=300, required=False, strip=True)
+    foto = forms.ImageField(required=False, validators=[validar_foto])
+
+
+class CalificacionForm(forms.Form):
+    """FN-7: estrellas de 1 a 5 (obligatorio) y comentario opcional de hasta 300 caracteres."""
+
+    estrellas = forms.IntegerField(min_value=1, max_value=5)
+    comentario = forms.CharField(max_length=300, required=False, strip=True)

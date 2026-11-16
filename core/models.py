@@ -284,13 +284,18 @@ class Solicitud(models.Model):
         self.rechazada_por.add(tecnico)
 
     def finalizar(self, notas=""):
-        """FN-12: solo el técnico asignado y solo si está en curso (validar en la vista)."""
-        if self.estado != self.Estado.EN_CURSO:
+        """
+        FN-12: solo si sigue en curso. Igual que aceptar(), el UPDATE condicional es
+        atómico: con una instancia desactualizada o un doble clic, solo uno gana.
+        """
+        ahora = timezone.now()
+        filas = Solicitud.objects.filter(pk=self.pk, estado=self.Estado.EN_CURSO).update(
+            estado=self.Estado.FINALIZADA, fecha_finalizacion=ahora, notas_finales=notas)
+        if filas == 0:
             raise ValueError("Solo se puede finalizar una solicitud en curso.")
         self.estado = self.Estado.FINALIZADA
-        self.fecha_finalizacion = timezone.now()
+        self.fecha_finalizacion = ahora
         self.notas_finales = notas
-        self.save(update_fields=["estado", "fecha_finalizacion", "notas_finales"])
 
     @property
     def puede_calificarse(self):
