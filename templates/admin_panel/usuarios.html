@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Usuarios{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Usuarios</h1>
+
+<form method="get" class="fx-card mb-3 row g-2 align-items-end">
+  <div class="col-md-4"><label class="form-label small mb-1" for="q">Buscar</label>
+    <input class="form-control" id="q" name="q" value="{{ q }}" placeholder="Nombre, correo o cédula"></div>
+  <div class="col-6 col-md-3"><label class="form-label small mb-1" for="rol">Rol</label>
+    <select class="form-select" id="rol" name="rol">
+      <option value="">Todos</option>
+      <option value="cliente" {% if f_rol == "cliente" %}selected{% endif %}>Clientes</option>
+      <option value="tecnico" {% if f_rol == "tecnico" %}selected{% endif %}>Técnicos</option>
+    </select></div>
+  <div class="col-6 col-md-3"><label class="form-label small mb-1" for="estado">Estado</label>
+    <select class="form-select" id="estado" name="estado">
+      <option value="">Todos</option>
+      {% for valor, nombre in estados %}<option value="{{ valor }}" {% if f_estado == valor %}selected{% endif %}>{{ nombre }}</option>{% endfor %}
+    </select></div>
+  <div class="col-md-2 d-grid"><button class="btn btn-fx" type="submit">Filtrar</button></div>
+</form>
+
+<div class="d-grid gap-3">
+  {% for u in usuarios %}
+  <article class="fx-card">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div>
+        <h2 class="h6 fw-bold mb-0">{{ u.nombre_completo }}</h2>
+        <div class="small text-muted">{{ u.get_rol_display }} · {{ u.correo }} · CC {{ u.cedula }}</div>
+      </div>
+      <span class="fx-badge {% if u.estado == 'suspendido' %}fx-badge--cancelada{% elif u.estado == 'activo' %}fx-badge--finalizada{% else %}fx-badge--pendiente{% endif %}">{{ u.get_estado_display }}</span>
+    </div>
+    {% if u.estado == "suspendido" %}
+      <p class="small mt-2 mb-2"><strong>Motivo:</strong> {{ u.motivo_suspension }}
+        <span class="text-muted">({{ u.fecha_suspension|date:"j M Y" }})</span></p>
+      <form method="post" action="{% url 'admin_usuario_accion' u.pk %}" class="m-0" onsubmit="return confirm('¿Reactivar la cuenta de {{ u.nombre_completo|escapejs }}?')">
+        {% csrf_token %}<input type="hidden" name="accion" value="reactivar">
+        <button class="btn btn-line btn-sm" type="submit"><i class="bi bi-arrow-counterclockwise"></i> Reactivar</button>
+      </form>
+    {% elif u.estado == "activo" %}
+      <details class="mt-2">
+        <summary class="btn btn-danger-soft btn-sm">Suspender</summary>
+        <form method="post" action="{% url 'admin_usuario_accion' u.pk %}" class="mt-2 d-grid gap-2" onsubmit="return confirm('¿Suspender la cuenta de {{ u.nombre_completo|escapejs }}?')">
+          {% csrf_token %}<input type="hidden" name="accion" value="suspender">
+          <label class="form-label small mb-0" for="motivo-{{ u.pk }}">Motivo (obligatorio, máx. 300)</label>
+          <textarea class="form-control" id="motivo-{{ u.pk }}" name="motivo" rows="2" maxlength="300" required></textarea>
+          <button class="btn btn-danger-soft" type="submit">Confirmar suspensión</button>
+        </form>
+      </details>
+    {% endif %}
+  </article>
+  {% empty %}
+  <div class="fx-card fx-empty"><i class="bi bi-people"></i><h3>No hay usuarios con esos filtros</h3></div>
+  {% endfor %}
+</div>
+
+{% if usuarios.paginator.num_pages > 1 %}
+<nav class="d-flex justify-content-center gap-2 mt-3" aria-label="Paginación">
+  {% if usuarios.has_previous %}<a class="btn btn-line btn-sm" href="?page={{ usuarios.previous_page_number }}&rol={{ f_rol }}&estado={{ f_estado }}&q={{ q|urlencode }}">Anterior</a>{% endif %}
+  <span class="small text-muted align-self-center">Página {{ usuarios.number }} de {{ usuarios.paginator.num_pages }}</span>
+  {% if usuarios.has_next %}<a class="btn btn-line btn-sm" href="?page={{ usuarios.next_page_number }}&rol={{ f_rol }}&estado={{ f_estado }}&q={{ q|urlencode }}">Siguiente</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

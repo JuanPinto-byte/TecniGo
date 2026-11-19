@@ -36,6 +36,11 @@
     </div>
     <div class="mt-3 d-flex gap-2">
       <a class="btn btn-line btn-sm" href="{% url 'solicitud_detalle' s.id %}">Ver detalle</a>
+      {% if s.puede_pagar %}
+      <a class="btn btn-fx btn-sm" href="{% url 'pagar_solicitud' s.id %}"><i class="bi bi-credit-card"></i> Pagar</a>
+      {% elif s.pagada %}
+      <a class="btn btn-line btn-sm" href="{% url 'comprobante_pago' s.id %}"><i class="bi bi-receipt-cutoff"></i> Comprobante</a>
+      {% endif %}
       {% if s.puede_calificar %}
       <button class="btn btn-fx btn-sm" type="button" data-calificar
               data-url="{% url 'calificar_solicitud' s.id %}" data-tecnico="{{ s.tecnico }}"><i class="bi bi-star-fill"></i> Calificar servicio</button>

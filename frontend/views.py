@@ -1,5 +1,6 @@
 from functools import wraps
 import math
+from datetime import datetime, time, timedelta
 from mimetypes import guess_type
 
 from django.conf import settings
@@ -8,14 +9,18 @@ from django.contrib.auth import authenticate, login, logout, update_session_auth
 from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.core.mail import send_mail
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
+from django.db.models import Q, Sum
 from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from core.forms import CalificacionForm, FinalizarSolicitudForm, PerfilClienteForm, PerfilTecnicoForm, RegistroClienteForm, SolicitudForm, RegistroTecnicoForm
-from core.models import Calificacion, Categoria, FotoSolicitud, Notificacion, PerfilTecnico, Solicitud, Usuario
+from core import pasarela
+from core.forms import CalificacionForm, ConfiguracionComisionForm, PagoForm, FinalizarSolicitudForm, PerfilClienteForm, PerfilTecnicoForm, RegistroClienteForm, SolicitudForm, RegistroTecnicoForm
+from core.models import Calificacion, Categoria, Comision, ConfiguracionComision, Pago, FotoSolicitud, Notificacion, PerfilTecnico, Solicitud, Usuario
 
 from . import datos_falsos as d
 
@@ -106,7 +111,10 @@ def login_view(request):
                 Usuario.Estado.RECHAZADO: "Tu registro como técnico fue rechazado.",
                 Usuario.Estado.SUSPENDIDO: "Tu cuenta está suspendida.",
             }
-            messages.error(request, estado_mensajes.get(usuario.estado, "La cuenta no está habilitada."))
+            mensaje = estado_mensajes.get(usuario.estado, "La cuenta no está habilitada.")
+            if usuario.esta_suspendido and usuario.motivo_suspension:
+                mensaje += f" Motivo: {usuario.motivo_suspension}"
+            messages.error(request, mensaje)
         else:
             login(request, usuario)
             destinos = {
@@ -280,7 +288,7 @@ def _ordenar(queryset, orden):
 def cliente_historial(request):
     """FN-6: todas mis solicitudes (nunca las de otro cliente), con filtro por estado y orden."""
     estado, orden = _orden_y_estado(request, Solicitud.Estado.values)
-    consulta = Solicitud.objects.filter(cliente=request.user).select_related("tecnico", "calificacion")
+    consulta = Solicitud.objects.filter(cliente=request.user).select_related("tecnico", "calificacion", "pago")
     if estado != "todas":
         consulta = consulta.filter(estado=estado)
     solicitudes = [{
@@ -292,6 +300,8 @@ def cliente_historial(request):
         "estado": s.estado,
         "tecnico": s.tecnico.nombre_completo if s.tecnico else "Sin asignar",
         "puede_calificar": s.puede_calificarse,
+        "puede_pagar": s.puede_pagarse,
+        "pagada": hasattr(s, "pago") and s.pago.estado == Pago.Estado.EXITOSO,
     } for s in _ordenar(consulta, orden)]
     return render(request, "cliente/historial.html", _ctx(
         "cliente", solicitudes=solicitudes, estado=estado, orden=orden,
@@ -692,3 +702,179 @@ def solicitud_detalle(request, solicitud_id):
         fotos_finalizacion=[f for f in solicitud.fotos.all() if f.tipo == FotoSolicitud.Tipo.FINALIZACION],
         calificacion=getattr(solicitud, "calificacion", None),
         ver_como_cliente=usuario.rol == Usuario.Rol.CLIENTE))
+
+
+# ---------- Pagos (FN-17): sandbox, sin datos sensibles en nuestra base ----------
+def _monto_txt(monto):
+    return f"${monto:,.0f}".replace(",", ".")
+
+
+@requiere_rol(Usuario.Rol.CLIENTE)
+def pagar_solicitud(request, solicitud_id):
+    solicitud = get_object_or_404(
+        Solicitud.objects.select_related("tecnico", "cliente"), pk=solicitud_id, cliente=request.user)
+    if not solicitud.puede_pagarse:
+        messages.error(request, "Esta solicitud no se puede pagar (no está finalizada o ya fue pagada).")
+        return redirect("cliente_historial")
+    if request.method != "POST":
+        return render(request, "cliente/pagar.html", _ctx("cliente", solicitud=solicitud, form=PagoForm()))
+
+    form = PagoForm(request.POST)
+    if not form.is_valid():
+        return render(request, "cliente/pagar.html", _ctx(
+            "cliente", solicitud=solicitud, form=form, medio=request.POST.get("medio_pago", "tarjeta"),
+            monto=request.POST.get("monto", "")))
+    datos = form.cleaned_data
+    # Número y CVV solo viajan a la pasarela; no se guardan en ningún modelo.
+    resultado = pasarela.procesar(datos["medio_pago"], datos["monto"], datos)
+    try:
+        with transaction.atomic():
+            pago, _ = Pago.objects.get_or_create(
+                solicitud=solicitud, defaults={"medio_pago": datos["medio_pago"], "monto": datos["monto"]})
+            if pago.estado == Pago.Estado.EXITOSO:
+                raise ValueError("ya pagada")
+            pago.medio_pago, pago.monto = datos["medio_pago"], datos["monto"]
+            pago.save(update_fields=["medio_pago", "monto"])
+            if resultado.aprobado:
+                pago.marcar_exitoso(resultado.referencia)
+                texto = _monto_txt(pago.monto)
+                Notificacion.objects.bulk_create([
+                    Notificacion(usuario=solicitud.cliente, tipo=Notificacion.Tipo.PAGO_EXITOSO,
+                                 solicitud=solicitud, mensaje=f"Tu pago de {texto} fue exitoso. Ya puedes ver tu comprobante."),
+                    Notificacion(usuario=solicitud.tecnico, tipo=Notificacion.Tipo.PAGO_EXITOSO,
+                                 solicitud=solicitud, mensaje=f"{solicitud.cliente.nombre_completo} pagó el servicio de {solicitud.get_categoria_display()}."),
+                ])
+            else:
+                pago.marcar_fallido(resultado.motivo)
+                Notificacion.objects.create(
+                    usuario=solicitud.cliente, tipo=Notificacion.Tipo.PAGO_FALLIDO, solicitud=solicitud,
+                    mensaje=f"Tu pago no se pudo procesar: {resultado.motivo}")
+    except ValueError:
+        messages.error(request, "Esta solicitud ya fue pagada.")
+        return redirect("cliente_historial")
+    if resultado.aprobado:
+        messages.success(request, "¡Pago exitoso!")
+        return redirect("comprobante_pago", solicitud_id=solicitud.pk)
+    messages.error(request, resultado.motivo)
+    return redirect("pagar_solicitud", solicitud_id=solicitud.pk)
+
+
+@require_GET
+@requiere_rol(Usuario.Rol.CLIENTE)
+def comprobante_pago(request, solicitud_id):
+    solicitud = get_object_or_404(
+        Solicitud.objects.select_related("tecnico", "pago"), pk=solicitud_id, cliente=request.user,
+        pago__estado=Pago.Estado.EXITOSO)
+    return render(request, "cliente/comprobante.html", _ctx(
+        "cliente", solicitud=solicitud, pago=solicitud.pago, monto_txt=_monto_txt(solicitud.pago.monto)))
+
+
+# ---------- Administrador: usuarios (FN-15), reportes (FN-16), comisión (FN-18) ----------
+@require_GET
+@requiere_rol(Usuario.Rol.ADMINISTRADOR)
+def admin_usuarios(request):
+    consulta = Usuario.objects.filter(rol__in=(Usuario.Rol.CLIENTE, Usuario.Rol.TECNICO))
+    rol, estado = request.GET.get("rol", ""), request.GET.get("estado", "")
+    q = request.GET.get("q", "").strip()
+    if rol in (Usuario.Rol.CLIENTE, Usuario.Rol.TECNICO):
+        consulta = consulta.filter(rol=rol)
+    else:
+        rol = ""
+    if estado in Usuario.Estado.values:
+        consulta = consulta.filter(estado=estado)
+    else:
+        estado = ""
+    if q:
+        consulta = consulta.filter(
+            Q(nombre_completo__icontains=q) | Q(correo__icontains=q) | Q(cedula__icontains=q))
+    pagina = Paginator(consulta.order_by("-date_joined", "-pk"), 20).get_page(request.GET.get("page"))
+    return render(request, "admin_panel/usuarios.html", _ctx(
+        "admin", usuarios=pagina, f_rol=rol, f_estado=estado, q=q, estados=Usuario.Estado.choices))
+
+
+@require_POST
+@requiere_rol(Usuario.Rol.ADMINISTRADOR)
+def admin_usuario_accion(request, usuario_id):
+    usuario = get_object_or_404(Usuario, pk=usuario_id)
+    accion = request.POST.get("accion")
+    if accion not in {"suspender", "reactivar"}:
+        messages.error(request, "Acción no válida.")
+        return redirect("admin_usuarios")
+    if usuario.pk == request.user.pk or usuario.rol == Usuario.Rol.ADMINISTRADOR:
+        messages.error(request, "Las cuentas de administrador no se pueden suspender.")
+        return redirect("admin_usuarios")
+
+    if accion == "suspender":
+        motivo = request.POST.get("motivo", "").strip()
+        if usuario.estado != Usuario.Estado.ACTIVO:
+            # Solo cuentas activas: reactivar un técnico pendiente lo dejaría activo sin aprobación.
+            messages.error(request, "Solo se pueden suspender cuentas activas.")
+        elif not motivo:
+            messages.error(request, "Escribe el motivo de la suspensión.")
+        elif len(motivo) > 300:
+            messages.error(request, "El motivo no puede superar 300 caracteres.")
+        else:
+            with transaction.atomic():
+                usuario.suspender(motivo)
+                Notificacion.objects.create(
+                    usuario=usuario, tipo=Notificacion.Tipo.USUARIO_SUSPENDIDO,
+                    mensaje=f"Tu cuenta fue suspendida. Motivo: {motivo}")
+            send_mail("Tu cuenta de TecniGo fue suspendida", f"Motivo: {motivo}",
+                      settings.DEFAULT_FROM_EMAIL, [usuario.correo], fail_silently=True)
+            messages.success(request, "Cuenta suspendida.")
+    else:
+        if usuario.estado != Usuario.Estado.SUSPENDIDO:
+            messages.error(request, "Esta cuenta no está suspendida.")
+        else:
+            usuario.reactivar()
+            messages.success(request, "Cuenta reactivada.")
+    return redirect(request.META.get("HTTP_REFERER") or "admin_usuarios")
+
+
+def _parsear_fecha(texto):
+    return datetime.strptime(texto, "%Y-%m-%d").date()
+
+
+@require_GET
+@requiere_rol(Usuario.Rol.ADMINISTRADOR)
+def admin_reportes(request):
+    """FN-16: tres métricas agregadas de solo lectura, con filtro por rango de fechas."""
+    hoy = timezone.localdate()
+    desde, hasta = hoy.replace(day=1), hoy
+    texto_desde, texto_hasta = request.GET.get("desde", "").strip(), request.GET.get("hasta", "").strip()
+    try:
+        d = _parsear_fecha(texto_desde) if texto_desde else desde
+        h = _parsear_fecha(texto_hasta) if texto_hasta else hasta
+        fin = h + timedelta(days=1)  # el día "hasta" entra completo
+    except (ValueError, OverflowError):
+        messages.error(request, "Alguna fecha no es válida (usa AAAA-MM-DD); se muestra el mes en curso.")
+    else:
+        if d > h:
+            messages.error(request, "La fecha inicial debe ser anterior o igual a la final; se muestra el mes en curso.")
+        else:
+            desde, hasta = d, h
+    inicio_dt = timezone.make_aware(datetime.combine(desde, time.min))
+    fin_dt = timezone.make_aware(datetime.combine(hasta + timedelta(days=1), time.min))
+    servicios = Solicitud.objects.filter(
+        estado=Solicitud.Estado.FINALIZADA, fecha_finalizacion__gte=inicio_dt, fecha_finalizacion__lt=fin_dt).count()
+    tecnicos = Usuario.objects.filter(rol=Usuario.Rol.TECNICO, estado=Usuario.Estado.ACTIVO).count()
+    comisiones = Comision.objects.filter(
+        fecha_calculo__gte=inicio_dt, fecha_calculo__lt=fin_dt).aggregate(total=Sum("monto_comision"))["total"] or 0
+    return render(request, "admin_panel/reportes.html", _ctx(
+        "admin", desde=desde, hasta=hasta, servicios=servicios, tecnicos_activos=tecnicos,
+        comisiones=comisiones, comisiones_txt=_monto_txt(comisiones)))
+
+
+@requiere_rol(Usuario.Rol.ADMINISTRADOR)
+def admin_comision(request):
+    config = ConfiguracionComision.actual()
+    if request.method == "POST":
+        form = ConfiguracionComisionForm(request.POST)
+        if form.is_valid():
+            config.porcentaje = form.cleaned_data["porcentaje"]
+            config.save()
+            messages.success(request, "Porcentaje de comisión actualizado. Aplica a los pagos nuevos.")
+            return redirect("admin_comision")
+    else:
+        form = ConfiguracionComisionForm()
+    return render(request, "admin_panel/comision.html", _ctx("admin", form=form, config=config))

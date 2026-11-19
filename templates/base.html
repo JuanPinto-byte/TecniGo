@@ -23,6 +23,9 @@
   {% url 'tecnico_solicitudes' as u_tec_sol %}
   {% url 'tecnico_perfil' as u_tec_perfil %}
   {% url 'tecnico_historial' as u_tec_hist %}
+  {% url 'admin_usuarios' as u_adm_usr %}
+  {% url 'admin_reportes' as u_adm_rep %}
+  {% url 'admin_comision' as u_adm_com %}
   {% url 'cliente_perfil' as u_cli_perfil %}
   {% url 'admin_tecnicos' as u_adm_tec %}
 
@@ -51,8 +54,9 @@
       {% elif rol == 'admin' %}
         <nav class="fx-nav" aria-label="Principal">
           <a class="fx-nav__item {% if request.path == u_adm_tec %}is-active{% endif %}" href="{{ u_adm_tec }}"><i class="bi bi-patch-check-fill"></i><span>Aprobaciones</span></a>
-          <a class="fx-nav__item" href="#" data-pronto><i class="bi bi-people-fill"></i><span>Usuarios</span></a>
-          <a class="fx-nav__item" href="#" data-pronto><i class="bi bi-bar-chart-fill"></i><span>Reportes</span></a>
+          <a class="fx-nav__item {% if request.path == u_adm_usr %}is-active{% endif %}" href="{{ u_adm_usr }}"><i class="bi bi-people-fill"></i><span>Usuarios</span></a>
+          <a class="fx-nav__item {% if request.path == u_adm_rep %}is-active{% endif %}" href="{{ u_adm_rep }}"><i class="bi bi-bar-chart-fill"></i><span>Reportes</span></a>
+          <a class="fx-nav__item {% if request.path == u_adm_com %}is-active{% endif %}" href="{{ u_adm_com }}"><i class="bi bi-percent"></i><span>Comisión</span></a>
         </nav>
       {% endif %}
 

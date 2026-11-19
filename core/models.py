@@ -11,11 +11,13 @@ para no repetir strings sueltos por el código (y para que coincidan
 exactamente con los valores que ya usa el frontend en
 frontend/datos_falsos.py).
 """
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.conf import settings
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MaxValueValidator, MinLengthValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from .validators import validar_cedula, validar_certificacion, validar_foto
@@ -440,16 +442,26 @@ class Pago(models.Model):
     referencia_pasarela = models.CharField(max_length=100, blank=True)
     motivo_fallo = models.CharField(max_length=255, blank=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
+    # Momento en que el pago quedó exitoso (fecha del comprobante).
+    fecha_pago = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Pago {self.get_estado_display()} — solicitud #{self.solicitud_id}"
 
     def marcar_exitoso(self, referencia_pasarela):
-        """FN-17 + FN-18: al quedar exitoso, dispara el cálculo de comisión."""
-        self.estado = self.Estado.EXITOSO
-        self.referencia_pasarela = referencia_pasarela
-        self.save(update_fields=["estado", "referencia_pasarela"])
-        Comision.calcular_para(self)
+        """
+        FN-17 + FN-18: al quedar exitoso, dispara el cálculo de comisión.
+        El UPDATE condicional es atómico: si ya estaba exitoso (doble clic o
+        instancia desactualizada) no se registra ni se calcula nada dos veces.
+        """
+        with transaction.atomic():
+            filas = Pago.objects.filter(pk=self.pk).exclude(estado=self.Estado.EXITOSO).update(
+                estado=self.Estado.EXITOSO, referencia_pasarela=referencia_pasarela,
+                motivo_fallo="", fecha_pago=timezone.now())
+            if filas == 0:
+                raise ValueError("Este pago ya fue registrado como exitoso.")
+            self.refresh_from_db()
+            Comision.calcular_para(self)
 
     def marcar_fallido(self, motivo):
         self.estado = self.Estado.FALLIDO
@@ -477,10 +489,12 @@ class Comision(models.Model):
         futuro de configuración no altere comisiones ya calculadas.
         """
         porcentaje = ConfiguracionComision.actual().porcentaje
-        monto_comision = round(pago.monto * porcentaje / 100)
+        monto = Decimal(pago.monto)
+        # Medio hacia arriba (1005 al 10 % = 101): round() de Python redondea al par (100).
+        monto_comision = (monto * porcentaje / 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         return cls.objects.create(
             pago=pago,
             porcentaje_aplicado=porcentaje,
             monto_comision=monto_comision,
-            monto_neto_tecnico=pago.monto - monto_comision,
+            monto_neto_tecnico=monto - monto_comision,
         )

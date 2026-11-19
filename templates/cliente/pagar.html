@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Pagar servicio{% endblock %}
+{% block content %}
+<a class="small text-muted d-inline-block mb-2" href="{% url 'cliente_historial' %}"><i class="bi bi-arrow-left"></i> Volver</a>
+<h1 class="h3 mb-1">Pagar servicio</h1>
+<p class="text-muted">{{ solicitud.get_categoria_display }}{% if solicitud.tecnico %} · {{ solicitud.tecnico.nombre_completo }}{% endif %}</p>
+
+<div class="alert alert-info small" role="note">
+  <strong>Modo de pruebas (sandbox):</strong> no se cobra dinero real y nunca guardamos el número de tu tarjeta ni el CVV.
+  Tarjetas de prueba: <code>4242 4242 4242 4242</code> aprueba, <code>4000 0000 0000 0002</code> rechaza,
+  <code>4000 0000 0000 9995</code> sin fondos, <code>4000 0000 0000 0119</code> sin respuesta.
+</div>
+
+<form method="post" class="fx-card d-grid gap-3" id="formPago" novalidate>
+  {% csrf_token %}
+  {% if form.errors %}
+  <div class="alert alert-danger mb-0" role="alert">
+    <ul class="mb-0">{% for campo, errores in form.errors.items %}{% for e in errores %}<li>{{ e }}</li>{% endfor %}{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div>
+    <label class="form-label" for="monto">Monto acordado (COP)</label>
+    <input class="form-control" id="monto" name="monto" inputmode="numeric" value="{{ monto|default:'' }}" placeholder="Ej.: 80000" required>
+    <div class="form-text">Entre $1.000 y $10.000.000. El precio de referencia del técnico es solo informativo.</div>
+  </div>
+
+  <fieldset>
+    <legend class="form-label fs-6">Medio de pago</legend>
+    <div class="d-flex flex-wrap gap-3">
+      <div class="form-check"><input class="form-check-input" type="radio" name="medio_pago" id="m_tarjeta" value="tarjeta" {% if medio|default:'tarjeta' == 'tarjeta' %}checked{% endif %}><label class="form-check-label" for="m_tarjeta">Tarjeta</label></div>
+      <div class="form-check"><input class="form-check-input" type="radio" name="medio_pago" id="m_pse" value="pse" {% if medio == 'pse' %}checked{% endif %}><label class="form-check-label" for="m_pse">PSE</label></div>
+      <div class="form-check"><input class="form-check-input" type="radio" name="medio_pago" id="m_billetera" value="billetera" {% if medio == 'billetera' %}checked{% endif %}><label class="form-check-label" for="m_billetera">Billetera digital</label></div>
+    </div>
+  </fieldset>
+
+  <div data-medio="tarjeta" class="d-grid gap-2">
+    <div><label class="form-label" for="numero">Número de tarjeta</label>
+      <input class="form-control" id="numero" name="numero" inputmode="numeric" autocomplete="off" maxlength="23" placeholder="4242 4242 4242 4242"></div>
+    <div class="row g-2">
+      <div class="col-6"><label class="form-label" for="vencimiento">Vence (MM/AA)</label>
+        <input class="form-control" id="vencimiento" name="vencimiento" autocomplete="off" maxlength="5" placeholder="12/29"></div>
+      <div class="col-6"><label class="form-label" for="cvv">CVV</label>
+        <input class="form-control" id="cvv" name="cvv" type="password" inputmode="numeric" autocomplete="off" maxlength="4"></div>
+    </div>
+  </div>
+  <div data-medio="pse" hidden>
+    <label class="form-label" for="banco">Banco</label>
+    <select class="form-select" id="banco" name="banco">
+      {% for valor, nombre in form.BANCOS %}<option value="{{ valor }}">{{ nombre }}</option>{% endfor %}
+    </select>
+  </div>
+  <div data-medio="billetera" hidden>
+    <label class="form-label" for="celular">Celular de la billetera</label>
+    <input class="form-control" id="celular" name="celular" inputmode="numeric" maxlength="10" placeholder="3001234567">
+  </div>
+
+  <button class="btn btn-fx btn-lg" type="submit" id="enviarPago">Pagar</button>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const radios = document.querySelectorAll("input[name=medio_pago]");
+  const paneles = document.querySelectorAll("[data-medio]");
+  const mostrar = () => {
+    const medio = document.querySelector("input[name=medio_pago]:checked").value;
+    paneles.forEach((p) => { p.hidden = p.dataset.medio !== medio; });
+  };
+  radios.forEach((r) => r.addEventListener("change", mostrar)); mostrar();
+  document.getElementById("formPago").addEventListener("submit", () => {
+    document.getElementById("enviarPago").disabled = true;   // evita el doble cobro por doble clic
+  });
+})();
+</script>
+{% endblock %}

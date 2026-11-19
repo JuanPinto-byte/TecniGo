@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Comprobante de pago{% endblock %}
+{% block content %}
+<a class="small text-muted d-inline-block mb-2" href="{% url 'cliente_historial' %}"><i class="bi bi-arrow-left"></i> Volver</a>
+<article class="fx-card" id="comprobante">
+  <div class="text-center mb-3">
+    <i class="bi bi-check-circle-fill" style="font-size:2.5rem;color:var(--fx-teal,#0F766E)"></i>
+    <h1 class="h4 mt-2 mb-0">Pago exitoso</h1>
+    <div class="text-muted small">Comprobante de pago (ambiente de pruebas)</div>
+  </div>
+  <dl class="row mb-0">
+    <dt class="col-5 text-muted fw-normal">Transacción</dt><dd class="col-7 fw-semibold text-break">{{ pago.referencia_pasarela }}</dd>
+    <dt class="col-5 text-muted fw-normal">Monto</dt><dd class="col-7 fw-bold">{{ monto_txt }}</dd>
+    <dt class="col-5 text-muted fw-normal">Fecha</dt><dd class="col-7">{{ pago.fecha_pago|date:"j M Y, g:i a" }}</dd>
+    <dt class="col-5 text-muted fw-normal">Medio de pago</dt><dd class="col-7">{{ pago.get_medio_pago_display }}</dd>
+    <dt class="col-5 text-muted fw-normal">Servicio</dt><dd class="col-7">{{ solicitud.get_categoria_display }}</dd>
+    {% if solicitud.tecnico %}<dt class="col-5 text-muted fw-normal">Técnico</dt><dd class="col-7">{{ solicitud.tecnico.nombre_completo }}</dd>{% endif %}
+  </dl>
+  <button class="btn btn-line mt-3" type="button" onclick="window.print()"><i class="bi bi-printer"></i> Imprimir</button>
+</article>
+{% endblock %}

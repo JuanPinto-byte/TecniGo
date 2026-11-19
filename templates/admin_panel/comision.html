@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Comisión{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Comisión de la plataforma</h1>
+<form method="post" class="fx-card d-grid gap-3" style="max-width:480px">
+  {% csrf_token %}
+  {% if form.errors %}<div class="alert alert-danger mb-0" role="alert">{% for e in form.porcentaje.errors %}{{ e }}{% endfor %}</div>{% endif %}
+  <div>
+    <label class="form-label" for="porcentaje">Porcentaje de comisión (%)</label>
+    <input class="form-control" id="porcentaje" name="porcentaje" inputmode="decimal" value="{{ config.porcentaje|stringformat:'s' }}" required>
+    <div class="form-text">Entre 0 y 100, con punto y hasta 2 decimales. Aplica solo a los pagos nuevos; las comisiones ya calculadas no cambian.</div>
+  </div>
+  <button class="btn btn-fx" type="submit">Guardar</button>
+</form>
+{% endblock %}

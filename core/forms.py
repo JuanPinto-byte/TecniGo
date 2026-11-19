@@ -1,10 +1,12 @@
 import re
+from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
-from .models import Categoria, FotoSolicitud, Notificacion, PerfilTecnico, Solicitud, Usuario
+from .models import Categoria, FotoSolicitud, Notificacion, Pago, PerfilTecnico, Solicitud, Usuario
 from .validators import validar_certificacion, validar_foto
 
 ATRS_TEXTO = "form-control"
@@ -482,3 +484,75 @@ class CalificacionForm(forms.Form):
 
     estrellas = forms.IntegerField(min_value=1, max_value=5)
     comentario = forms.CharField(max_length=300, required=False, strip=True)
+
+
+
+# =====================================================================
+# Sprint 6
+# =====================================================================
+MONTO_MINIMO = 1000
+MONTO_MAXIMO = 10_000_000
+
+
+def _luhn_valido(numero):
+    suma = 0
+    for i, digito in enumerate(reversed(numero)):
+        n = int(digito)
+        if i % 2 == 1:
+            n = n * 2 - 9 if n * 2 > 9 else n * 2
+        suma += n
+    return suma % 10 == 0
+
+
+class PagoForm(forms.Form):
+    """FN-17: medio de pago y los datos que cada medio exige (nunca se guardan)."""
+
+    BANCOS = (("aprobado", "Banco de pruebas (aprueba)"), ("rechazado", "Banco de pruebas (rechaza)"))
+
+    medio_pago = forms.ChoiceField(choices=Pago.Medio.choices)
+    monto = forms.IntegerField(min_value=MONTO_MINIMO, max_value=MONTO_MAXIMO)
+    numero = forms.CharField(required=False)
+    cvv = forms.CharField(required=False)
+    vencimiento = forms.CharField(required=False)
+    banco = forms.ChoiceField(choices=BANCOS, required=False)
+    celular = forms.CharField(required=False)
+
+    def clean(self):
+        datos = super().clean()
+        medio = datos.get("medio_pago")
+        if medio == Pago.Medio.TARJETA:
+            numero = re.sub(r"[ -]", "", datos.get("numero", ""))
+            if not (numero.isdigit() and 13 <= len(numero) <= 19 and _luhn_valido(numero)):
+                self.add_error("numero", "Número de tarjeta inválido.")
+            datos["numero"] = numero
+            if not re.fullmatch(r"\d{3,4}", datos.get("cvv", "")):
+                self.add_error("cvv", "El CVV tiene 3 o 4 dígitos.")
+            coincide = re.fullmatch(r"(0[1-9]|1[0-2])/(\d{2})", datos.get("vencimiento", ""))
+            if not coincide:
+                self.add_error("vencimiento", "Usa el formato MM/AA.")
+            else:
+                hoy = timezone.localdate()
+                if (2000 + int(coincide.group(2)), int(coincide.group(1))) < (hoy.year, hoy.month):
+                    self.add_error("vencimiento", "La tarjeta está vencida.")
+        elif medio == Pago.Medio.PSE:
+            if not datos.get("banco"):
+                self.add_error("banco", "Elige un banco.")
+        elif medio == Pago.Medio.BILLETERA:
+            if not re.fullmatch(r"3\d{9}", datos.get("celular", "")):
+                self.add_error("celular", "Escribe un celular colombiano de 10 dígitos.")
+        return datos
+
+
+class ConfiguracionComisionForm(forms.Form):
+    """FN-18: porcentaje entre 0 y 100 con máximo 2 decimales."""
+
+    porcentaje = forms.CharField(max_length=6)
+
+    def clean_porcentaje(self):
+        texto = self.cleaned_data["porcentaje"].strip()
+        if not re.fullmatch(r"\d{1,3}(\.\d{1,2})?", texto):
+            raise ValidationError("Escribe un número entre 0 y 100, con punto y máximo 2 decimales.")
+        valor = Decimal(texto)
+        if valor > 100:
+            raise ValidationError("El porcentaje no puede superar 100.")
+        return valor

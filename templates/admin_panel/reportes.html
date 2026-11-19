@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Reportes{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Reportes</h1>
+<form method="get" class="fx-card mb-3 row g-2 align-items-end">
+  <div class="col-6 col-md-4"><label class="form-label small mb-1" for="desde">Desde</label>
+    <input class="form-control" type="date" id="desde" name="desde" value="{{ desde|date:'Y-m-d' }}"></div>
+  <div class="col-6 col-md-4"><label class="form-label small mb-1" for="hasta">Hasta</label>
+    <input class="form-control" type="date" id="hasta" name="hasta" value="{{ hasta|date:'Y-m-d' }}"></div>
+  <div class="col-md-4 d-grid"><button class="btn btn-fx" type="submit">Ver reporte</button></div>
+</form>
+
+<div class="row g-3">
+  <div class="col-md-4"><div class="fx-card text-center h-100">
+    <i class="bi bi-check2-circle fs-2"></i>
+    <div class="display-6 fw-bold" id="m-servicios">{{ servicios }}</div>
+    <div class="text-muted">Servicios realizados</div>
+    <div class="small text-muted">Finalizados en el rango</div></div></div>
+  <div class="col-md-4"><div class="fx-card text-center h-100">
+    <i class="bi bi-person-check fs-2"></i>
+    <div class="display-6 fw-bold" id="m-tecnicos">{{ tecnicos_activos }}</div>
+    <div class="text-muted">Técnicos activos</div>
+    <div class="small text-muted">Aprobados y no suspendidos, hoy</div></div></div>
+  <div class="col-md-4"><div class="fx-card text-center h-100">
+    <i class="bi bi-cash-coin fs-2"></i>
+    <div class="display-6 fw-bold" id="m-comisiones">{{ comisiones_txt }}</div>
+    <div class="text-muted">Comisiones simuladas</div>
+    <div class="small text-muted">Calculadas en el rango</div></div></div>
+</div>
+<p class="small text-muted mt-3">Vista de solo lectura. Del {{ desde|date:"j M Y" }} al {{ hasta|date:"j M Y" }}.</p>
+{% endblock %}
